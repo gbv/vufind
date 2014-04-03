@@ -29,6 +29,8 @@
 namespace VuFind\ILS\Driver;
 use File_MARC, PDO, PDOException, Exception,
     VuFind\Exception\ILS as ILSException,
+	VuFindSearch\Backend\Exception\HttpErrorException,
+	Zend\Json\Json,
 	Zend\Http\Client,
 	Zend\Http\Request;
 
@@ -79,6 +81,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     protected $docService;
 
+	/**
+     * Location of OLE's solr service
+     *
+     * @var string
+     */
+    protected $solrService;
     /**
      * Set the HTTP service to be used for HTTP requests.
      *
@@ -140,7 +148,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         
         // Define OLE's docstore service
         $this->docService = $this->config['Catalog']['docstore_service'];
-
+		
+        // Define OLE's solr service
+        $this->solrService = $this->config['Catalog']['solr_service'];
+		
         $tns = '(DESCRIPTION=' .
                  '(ADDRESS_LIST=' .
                    '(ADDRESS=' .
@@ -249,45 +260,60 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getMyProfile($patron)
     {
+		$uri = $this->circService . '?service=lookupUser&patronId=' . $patron['id'] . '&operatorId=dev2';
+		$request = new Request();
+		$request->setMethod(Request::METHOD_GET);
+		$request->setUri($uri);
 
-        try {
-			/* TODO: Use the Zend HTTP service instead of file_get_contents */
-            $xml = simplexml_load_string(file_get_contents($this->circService . '?service=lookupUser&patronId=' . $patron['id'] . '&operatorId=dev2'));
-
-            $patron['email'] = '';
-            $patron['address1'] = '';
-            $patron['address2'] = null;
-            $patron['zip'] = '';
-            $patron['phone'] = '';
-            $patron['group'] = '';
+		$client = new Client();
+		$client->setOptions(array('timeout' => 30));
 			
-			if (!empty($xml->patronName->firstName)) {
-				$patron['firstname'] = utf8_encode($xml->patronName->firstName);
-			}
-			if (!empty($xml->patronName->lastName)) {
-				$patron['lastname'] = utf8_encode($xml->patronName->lastName);
-			}
-			if (!empty($xml->patronEmail->emailAddress)) {
-				$patron['email'] = utf8_encode($xml->patronEmail->emailAddress);
-			}
-			if (!empty($xml->patronAddress->line1)) {
-				$patron['address1'] = utf8_encode($xml->patronAddress->line1);
-			}
-			if (!empty($xml->patronAddress->line2)) {
-				$patron['address2'] = utf8_encode($xml->patronAddress->line2);
-			}
-			if (!empty($xml->patronAddress->postalCode)) {
-				$patron['zip'] = utf8_encode($xml->patronAddress->postalCode);
-			}
-			if (!empty($xml->patronPhone->phoneNumber)) {
-				$patron['phone'] = utf8_encode($xml->patronPhone->phoneNumber);
-			}
-
-            return (empty($patron) ? null : $patron);
-
-        } catch (Exception $e) { //TODO: switch this to catch exception thrown by zend http service
+        try {
+			$response = $client->dispatch($request);
+        } catch (Exception $e) { 
             throw new ILSException($e->getMessage());
         }
+		
+		if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+
+		$content = $response->getBody();
+		$xml = simplexml_load_string($content);
+		
+		//$holdingsJSON = Json::decode($content_str);
+		
+		$patron['email'] = '';
+		$patron['address1'] = '';
+		$patron['address2'] = null;
+		$patron['zip'] = '';
+		$patron['phone'] = '';
+		$patron['group'] = '';
+		
+		if (!empty($xml->patronName->firstName)) {
+			$patron['firstname'] = utf8_encode($xml->patronName->firstName);
+		}
+		if (!empty($xml->patronName->lastName)) {
+			$patron['lastname'] = utf8_encode($xml->patronName->lastName);
+		}
+		if (!empty($xml->patronEmail->emailAddress)) {
+			$patron['email'] = utf8_encode($xml->patronEmail->emailAddress);
+		}
+		if (!empty($xml->patronAddress->line1)) {
+			$patron['address1'] = utf8_encode($xml->patronAddress->line1);
+		}
+		if (!empty($xml->patronAddress->line2)) {
+			$patron['address2'] = utf8_encode($xml->patronAddress->line2);
+		}
+		if (!empty($xml->patronAddress->postalCode)) {
+			$patron['zip'] = utf8_encode($xml->patronAddress->postalCode);
+		}
+		if (!empty($xml->patronPhone->phoneNumber)) {
+			$patron['phone'] = utf8_encode($xml->patronPhone->phoneNumber);
+		}
+
+		return (empty($patron) ? null : $patron);
+
     }
 
     /**
@@ -312,20 +338,40 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         */
         $transList = array();
 
+		$uri = $this->circService . '?service=getCheckedOutItems&patronId=' . $patron['id'] . '&operatorId=API';
+		$request = new Request();
+		$request->setMethod(Request::METHOD_GET);
+		$request->setUri($uri);
+
+		$client = new Client();
+		$client->setOptions(array('timeout' => 30));
+			
         try {
-			/* TODO: use the zend http service */
-			$xml = simplexml_load_string(file_get_contents($this->circService . '?service=getCheckedOutItems&patronId=' . $patron['id'] . '&operatorId=dev2'));
-		
-            $checkedOutItems = $xml->xpath('//checkOutItem');
-            
-            foreach($checkedOutItems as $item) {
-                $processRow = $this->processMyTransactionsData($item, $patron);
-                $transList[] = $processRow;
-            }
-            return $transList;
-        } catch (Exception $e) { //TODO: switch this to catch exception thrown by zend http service
+			$response = $client->dispatch($request);
+        } catch (Exception $e) { 
             throw new ILSException($e->getMessage());
         }
+
+		if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+		
+		$content_str = $response->getBody();
+		$xml = simplexml_load_string($content_str);
+		
+		$code = $xml->xpath('//code');
+		$code = (string)$code[0][0];
+
+		if ($code == '000') {
+			$checkedOutItems = $xml->xpath('//checkOutItem');
+			
+			foreach($checkedOutItems as $item) {
+				$processRow = $this->processMyTransactionsData($item, $patron);
+				$transList[] = $processRow;
+			}
+		}
+		return $transList;
+
     }
 	
     /**
@@ -416,10 +462,50 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         */
 
         $holdList = array();
+		
+		$uri = $this->circService . '?service=holds&patronId=' . $patron['id'] . '&operatorId=API';
+		var_dump($uri);
+		
+		$request = new Request();
+		$request->setMethod(Request::METHOD_GET);
+		$request->setUri($uri);
 
+		$client = new Client();
+		$client->setOptions(array('timeout' => 30));
+			
         try {
-			/* TODO: use the zend http service */
-			$xml = simplexml_load_string(file_get_contents($this->circService . '?service=holds&patronId=' . $patron['id'] . '&operatorId=API'));
+			$response = $client->dispatch($request);
+        } catch (Exception $e) { 
+            throw new ILSException($e->getMessage());
+        }
+
+		if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+		$content = $response->getBody();
+
+		$xml = simplexml_load_string($content);
+		
+		$code = $xml->xpath('//code');
+		$code = (string)$code[0][0];
+
+		if ($code == '000') {
+            $holdItems = $xml->xpath('//hold');
+			$holdsList = array();
+			
+            foreach($holdItems as $item) {
+                //var_dump($item);
+                $processRow = $this->processMyHoldsData($item, $patron);
+                //var_dump($processRow);
+                $holdsList[] = $processRow;
+            }
+		}
+		return $transList;
+		
+		/*
+        try {
+
+			//$xml = simplexml_load_string(file_get_contents($this->circService . '?service=holds&patronId=' . $patron['id'] . '&operatorId=API'));
 			
             $holdItems = $xml->xpath('//hold');
 			$holdsList = array();
@@ -431,9 +517,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 $holdsList[] = $processRow;
             }
             return $holdsList;
-        } catch (Exception $e) { //TODO: switch this to catch exception thrown by zend http service
+        } catch (Exception $e) { 
             throw new ILSException($e->getMessage());
         }
+		*/
     }
 
     /**
@@ -515,14 +602,14 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         /*
         http://localhost:8080/oledocstore/document?docAction=instanceDetails&format=xml&bibIds=1458569
         */
-		$uri = $this->docService . '?docAction=instanceDetails&format=xml&bibIds=' . $id;
-
+		//$uri = $this->docService . '?docAction=instanceDetails&format=xml&bibIds=' . $id;
+		$uri = $this->solrService . "?q=bibIdentifier:wbm-" . $id . "&wt=xml&rows=100000";
 		/* TODO: use the zend http service and throw appropriate exception */
 		$xml = simplexml_load_string(file_get_contents($uri));
 
 		
-		$xml->registerXPathNamespace('ole', 'http://ole.kuali.org/standards/ole-instance');
-		$xml->registerXPathNamespace('circ', 'http://ole.kuali.org/standards/ole-instance-circulation');
+		//$xml->registerXPathNamespace('ole', 'http://ole.kuali.org/standards/ole-instance');
+		//$xml->registerXPathNamespace('circ', 'http://ole.kuali.org/standards/ole-instance-circulation');
 
         return $xml;
     }
@@ -541,33 +628,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getStatus($id)
     {
-        
-        $record = $this->getRecord($id);
-
-        $holdingsXML = $record->xpath('//ole:oleHoldings');
-        $callNumber = $holdingsXML[0]->children('ole', true)->callNumber->children('ole', true)->number;
-		$location = '';
-		$locationsXML = $record->xpath('//circ:locationLevel');
-		foreach($locationsXML as $locationXML) {
-			$location .= (string)$locationXML->children('ole', true)->name . "/";
-		}
-        $itemsXML = $record->xpath('//ole:item');
-        $items = array();
-
-        foreach($itemsXML as $itemXML) {
-
-			$status = $itemXML->children('circ', true)->itemStatus->children()->fullValue;
-			$available = ($status != 'LOANED') ? true:false;
-
-			$item['status'] = $status;
-			$item['location'] = $location;
-			$item['reserve'] = '';
-			$item['availability'] = $available;
-			$item['callnumber'] = $callNumber;
-			$item['id'] = $id;
-
-            $items[] = $item;
-        }
+		$items = array();
+		$items = $this->getHolding($id);
 
         return $items;
     }
@@ -628,59 +690,90 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function getHolding($id, $patron = false)
     {
 
-        $record = $this->getRecord($id);
-        $holdingsXML = $record->xpath('//ole:oleHoldings');
-        $callNumber = (string) $holdingsXML[0]->children('ole', true)->callNumber->children('ole', true)->number;
-		$location = '';
-		$locationsXML = $record->xpath('//circ:locationLevel');
-		foreach($locationsXML as $locationXML) {
-			$location .= (string)$locationXML->children('ole', true)->name . "/";
-		}
-        $itemsXML = $record->xpath('//ole:item');
+		$uri = $this->solrService . "?q=bibIdentifier:wbm-" . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
+		$request = new Request();
+		$request->setMethod(Request::METHOD_GET);
+		$request->setUri($uri);
+
+		$client = new Client();
+		$client->setOptions(array('timeout' => 30));
 		
-        $items = array();
-        foreach($itemsXML as $itemXML) {
-            //var_dump($itemXML);
-            $status = (string) $itemXML->children('circ', true)->itemStatus->children()->fullValue;
-            $available = ($status != 'LOANED') ? true:false;
-            $item['id'] = $id;
-            $item['availability'] = $available;
-            $item['status'] = $status;
-            $item['location'] = $location;
-            $item['reserve'] = '';
-            $item['callnumber'] = $callNumber;
-            $item['duedate'] = (string) $itemXML->dueDateTime;
-            $item['returnDate'] = '';
-            $item['number'] = '';
-            $item['requests_placed'] = '';
-            $item['barcode'] = (string) $itemXML->children('ole', true)->accessInformation->children('ole', true)->barcode;
-            $item['notes'] = '';
-            $item['summary'] = '';
-			$item['item_id'] = (string) $itemXML->children('ole', true)->itemIdentifier;
-			
-			// Holds
-			$is_holdable = false;
-			$holdtype = 'hold';
-			$addLink = false;
-			$holdOverride = '';
-			
-			if ($patron && $available) {
-				$is_holdable = true;
-				$holdtype = 'hold';
-				$addLink = true;
-				$holdOverride = '';
-			}
-			
-			$item['is_holdable'] = $is_holdable;
-			$item['holdtype'] = $holdtype;
-			$item['addLink'] = $addLink;
-            $item['holdOverride'] = '';
-
-            //var_dump($item);
-
-            $items[] = $item;
+        try {
+			$response = $client->dispatch($request);
+        } catch (Exception $e) { 
+            throw new ILSException($e->getMessage());
         }
+		
+		if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+		
+		$content = $response->getBody();
+		$holdingsJSON = Json::decode($content);
+		
+		//var_dump($holdingsJSON);
+		
+		$items = array();
 
+		foreach($holdingsJSON->response->docs as $holdingJSON) {
+
+			$location = (string)$holdingJSON->LocationLevel_display[0];
+			$callNumber = (string)$holdingJSON->CallNumber_display[0];
+			$holdingsIdentifier = (string)$holdingJSON->holdingsIdentifier[0];
+			
+			$uri = $this->solrService . "?q=holdingsIdentifier:" . $holdingsIdentifier . "%20AND%20DocType:item&wt=json&rows=100000";
+			//$result = file_get_contents($q);
+			$request = new Request();
+			$request->setMethod(Request::METHOD_GET);
+			$request->setUri($uri);
+
+			$client = new Client();
+			$client->setOptions(array('timeout' => 30));
+			
+			$response = $client->dispatch($request);
+			
+			$content_str = $response->getBody();
+			$itemsJSON = Json::decode($content_str);
+
+			//var_dump($itemsJSON);
+			
+			foreach($itemsJSON->response->docs as $itemJSON) {
+
+				$itemIdentifier = (string)$itemJSON->itemIdentifier[0];
+				$barcode = (string)$itemJSON->ItemBarcode_display[0];
+				$copyNumber = (string)$itemJSON->CopyNumber_display;
+				$enumeration = (string)$itemJSON->Enumeration_search;
+				$status = (string)$itemJSON->ItemStatus_display[0];
+				$bibIdentifier = $id;
+				$available = ($status != 'LOANED') ? true:false;
+
+				$item['id'] = str_replace("wbm-","",$bibIdentifier);
+				$item['item_id'] = str_replace("wio-","",$itemIdentifier);
+				$item['availability'] = $available;
+				$item['status'] = $status;
+				$item['location'] = $location;
+				$item['reserve'] = '';
+				$item['callnumber'] = $callNumber;
+				//$item['duedate']
+				$item['returnDate'] = '';
+				$item['number'] = $copyNumber . " : " . $enumeration;
+				$item['requests_placed'] = '';
+				$item['barcode'] = $barcode;
+				$item['notes'] = '';
+				$item['summary'] = '';
+				$item['is_holdable'] = true;
+				$item['holdtype'] = 'hold';
+				$item['addLink'] = true;
+				
+				//var_dump($item);
+				
+				$items[] = $item;
+
+			}
+
+		}
+		
+		
         return $items;
 
     }
@@ -698,11 +791,13 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * whether or not it was successful and a system message (if available)
      */
     public function placeHold($holdDetails)
+
     {
 		/*		http://localhost:8080/olefs/circulation?service=placeRequest&patronId=20235562K&operatorId=API&itemBarcode=005123641675530699&requestType=Page%2fHold+Request
 				http://localhost:8080/olefs/circulation?service=placeRequest&patronId=10100055U&operatorId=API&itemBarcode=33165972443029224&requestType=Page%2fHold+Request
 		*/
 		
+		var_dump($holdDetails);
 		
 		$patron = $holdDetails['patron'];
 		$patronId = $patron['id'];
@@ -711,12 +806,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		$requestType = 'Page%2fHold+Request';
 		$bibId = $holdDetails['id'];
 		$itemBarcode = $holdDetails['barcode'];
-		
-		$record = $this->getRecord($bibId);
-		
+
 		$uri = $this->circService . "?service={$service}&patronId={$patronId}&operatorId={$operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
 		
-		//var_dump($uri);
+		var_dump($uri);
 		
 		$request = new Request();
 		$request->setMethod(Request::METHOD_POST);
@@ -724,21 +817,26 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
 		$client = new Client();
 		$client->setOptions(array('timeout' => 30));
-		
-		$response = $client->dispatch($request);
-		
-		$content_str = $response->getContent();
-		/* TODO: Hack to strip extraneous characters from response */
-		$content = substr($content_str, strpos($content_str, '<'), (strrpos($content_str, '>') - strpos($content_str, '<') + 1)); 
 
+        try {
+			$response = $client->dispatch($request);
+        } catch (Exception $e) { 
+            throw new ILSException($e->getMessage());
+        }
+		
+		if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+		
 		/* TODO: this will always be 201 */
 		$statusCode = $response->getStatusCode();
-
+		$content = $response->getBody();
+		
 		$xml = simplexml_load_string($content);
 		$msg = $xml->xpath('//message');
 		
 		/* TODO: this is a hack to get the appropriate boolean response from the service. The circ API always returns 'OK' regardless is the operation was allowed */
-		$success = (stristr((string)$msg[0], 'succes')) ? true:false;
+		//$success = (stristr((string)$msg[0], 'succes')) ? true:false;
 
 		return $this->returnString($success, (string)$msg[0]);
 
@@ -864,7 +962,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		
 		$patron = $renewDetails['patron'];
 		$patronId = $patron['id'];
-		$operatorId = 'API';
+		
+		// TODO: API account can not renew this item
+		//$operatorId = 'API';
+		$operatorId = 'dev2';
+		
 		$service = 'renewItem';
 		
 		$finalResult = array();
@@ -874,10 +976,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		  $itemBarcode = $details_arr[0];
 		  $item_id = $details_arr[1];
 
-			//$record = $this->getRecord($bibId);
-			
 			$uri = $this->circService . "?service={$service}&patronId={$patronId}&operatorId={$operatorId}&itemBarcode={$itemBarcode}";
-			
+
 			//var_dump($uri);
 			
 			$request = new Request();
@@ -886,14 +986,33 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
 			$client = new Client();
 
-			$response = $client->dispatch($request);
+			try {
+				$response = $client->dispatch($request);
+			} catch (Exception $e) { 
+				throw new ILSException($e->getMessage());
+			}
 			
-			//var_dump($response);
+			if (!$response->isSuccess()) {
+				throw HttpErrorException::createFromResponse($response);
+			}
+		
+			$content = $response->getBody();
+			$xml = simplexml_load_string($content);
+			$msg = $xml->xpath('//message');
+			$code = $xml->xpath('//code');
+			$code = (string)$code[0];
+			
+			$success = false;
+			
+			// TODO: base "success" on the returned codes from OLE
+			if ($code == '003') {
+				$success = true;
+			}
 			$finalResult['details'][$itemBarcode] = array(
-								"success" => false,
+								"success" => $success,
 								"new_date" => false,
 								"item_id" => $itemBarcode,
-								"sysMessage" => $response->getContent()
+								"sysMessage" => (string)$msg[0]
 								);
 			
 		}
