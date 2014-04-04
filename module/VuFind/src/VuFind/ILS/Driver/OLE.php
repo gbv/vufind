@@ -123,6 +123,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 	protected $holdingPrefix;
 	protected $itemPrefix;
 	
+	/* */
+	protected $dbvendor;
+	
     /**
      * Initialize the driver.
      *
@@ -143,10 +146,14 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		$this->holdingPrefix = "who-";
 		$this->itemPrefix = "wio-";
 		
+		$this->dbvendor
+            = isset($this->config['Catalog']['dbvendor'])
+            ? $this->config['Catalog']['dbvendor'] : "mysql";
+			
 		$this->checkRenewalsUpFront
             = isset($this->config['Renewals']['checkUpFront'])
             ? $this->config['Renewals']['checkUpFront'] : true;
-		
+			
 		$this->defaultPickUpLocation
             = $this->config['Holds']['defaultPickUpLocation'];
 
@@ -162,22 +169,29 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         // Define OLE's solr service
         $this->solrService = $this->config['Catalog']['solr_service'];
 		
-        $tns = '(DESCRIPTION=' .
-                 '(ADDRESS_LIST=' .
-                   '(ADDRESS=' .
-                     '(PROTOCOL=TCP)' .
-                     '(HOST=' . $this->config['Catalog']['host'] . ')' .
-                     '(PORT=' . $this->config['Catalog']['port'] . ')' .
-                   ')' .
-                 ')' .
-               ')';
         try {
-            $this->db = new PDO(
-                "mysql:host=localhost;port=3306;dbname=ole",
-                $this->config['Catalog']['user'],
-                $this->config['Catalog']['password']
-            );
-            
+			if ($this->dbvendor == 'oracle') {
+				$tns = '(DESCRIPTION=' .
+						 '(ADDRESS_LIST=' .
+						   '(ADDRESS=' .
+							 '(PROTOCOL=TCP)' .
+							 '(HOST=' . $this->config['Catalog']['host'] . ')' .
+							 '(PORT=' . $this->config['Catalog']['port'] . ')' .
+						   ')' .
+						 ')' .
+					   ')';
+				$this->db = new PDO(
+					"oci:dbname=$tns",
+					$this->config['Catalog']['user'],
+					$this->config['Catalog']['password']
+				);
+            } else {
+				$this->db = new PDO(
+					"mysql:host=" . $this->config['Catalog']['host'] . ";port=" . $this->config['Catalog']['port'] . ";dbname=" . $this->config['Catalog']['database'],
+					$this->config['Catalog']['user'],
+					$this->config['Catalog']['password']
+				);
+			}
             $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         } catch (PDOException $e) {
             throw $e;
@@ -228,7 +242,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                "where ole_ptrn_t.OLE_PTRN_ID=krim_entity_nm_t.ENTITY_ID AND " .
                "lower(krim_entity_nm_t.{$login_field}) = :login AND " .
                "lower(ole_ptrn_t.BARCODE) = :barcode";
-		//var_dump($sql);
+
 		
         try {
             $sqlStmt = $this->db->prepare($sql);
