@@ -118,6 +118,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     protected $defaultPickUpLocation;
 	
+	/* */
+	protected $bibPrefix;
+	protected $holdingPrefix;
+	protected $itemPrefix;
+	
     /**
      * Initialize the driver.
      *
@@ -133,6 +138,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             throw new ILSException('Configuration needs to be set.');
         }
         
+		/* TODO: move these to the config */
+		$this->bibPrefix = "wbm-";
+		$this->holdingPrefix = "who-";
+		$this->itemPrefix = "wio-";
+		
 		$this->checkRenewalsUpFront
             = isset($this->config['Renewals']['checkUpFront'])
             ? $this->config['Renewals']['checkUpFront'] : true;
@@ -218,7 +228,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                "where ole_ptrn_t.OLE_PTRN_ID=krim_entity_nm_t.ENTITY_ID AND " .
                "lower(krim_entity_nm_t.{$login_field}) = :login AND " .
                "lower(ole_ptrn_t.BARCODE) = :barcode";
-
+		//var_dump($sql);
+		
         try {
             $sqlStmt = $this->db->prepare($sql);
             $sqlStmt->bindParam(
@@ -227,7 +238,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             $sqlStmt->bindParam(
                 ':barcode', strtolower(utf8_decode($barcode)), PDO::PARAM_STR
             );
-
+			//var_dump($sqlStmt);
             $sqlStmt->execute();
             $row = $sqlStmt->fetch(PDO::FETCH_ASSOC);
             if (isset($row['OLE_PTRN_ID']) && ($row['OLE_PTRN_ID'] != '')) {
@@ -239,7 +250,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                     'cat_password' => $login,
                     'email' => null,
                     'major' => null,
-                    'college' => null);
+                    'college' => null,
+					'barcode' => $barcode);
             } else {
                 return null;
             }
@@ -261,28 +273,31 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function getMyProfile($patron)
     {
 		$uri = $this->circService . '?service=lookupUser&patronId=' . $patron['id'] . '&operatorId=dev2';
+
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
 		$request->setUri($uri);
-
+		
 		$client = new Client();
 		$client->setOptions(array('timeout' => 30));
-			
+
+		
         try {
 			$response = $client->dispatch($request);
         } catch (Exception $e) { 
             throw new ILSException($e->getMessage());
         }
 		
+		// TODO: reimplement something like this when the API starts returning the proper http status code
+		/*
 		if (!$response->isSuccess()) {
             throw HttpErrorException::createFromResponse($response);
         }
+		*/
 
 		$content = $response->getBody();
 		$xml = simplexml_load_string($content);
-		
-		//$holdingsJSON = Json::decode($content_str);
-		
+
 		$patron['email'] = '';
 		$patron['address1'] = '';
 		$patron['address2'] = null;
@@ -352,9 +367,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             throw new ILSException($e->getMessage());
         }
 
+		// TODO: reimplement something like this when the API starts returning the proper http status code
+		/*
 		if (!$response->isSuccess()) {
             throw HttpErrorException::createFromResponse($response);
         }
+		*/
 		
 		$content_str = $response->getBody();
 		$xml = simplexml_load_string($content_str);
@@ -478,10 +496,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         } catch (Exception $e) { 
             throw new ILSException($e->getMessage());
         }
-
+		// TODO: reimplement something like this when the API starts returning the proper http status code
+		/*
 		if (!$response->isSuccess()) {
             throw HttpErrorException::createFromResponse($response);
         }
+		*/
 		$content = $response->getBody();
 
 		$xml = simplexml_load_string($content);
@@ -603,7 +623,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         http://localhost:8080/oledocstore/document?docAction=instanceDetails&format=xml&bibIds=1458569
         */
 		//$uri = $this->docService . '?docAction=instanceDetails&format=xml&bibIds=' . $id;
-		$uri = $this->solrService . "?q=bibIdentifier:wbm-" . $id . "&wt=xml&rows=100000";
+		$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "&wt=xml&rows=100000";
 		/* TODO: use the zend http service and throw appropriate exception */
 		$xml = simplexml_load_string(file_get_contents($uri));
 
@@ -641,6 +661,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 	public function getItemStatus($itemXML) {
 
 		$status = $itemXML->children('circ', true)->itemStatus->children()->fullValue;
+		// TODO: enable all item statuses
 		$available = ($status != 'LOANED') ? true:false;
 
 		$item['status'] = $status;
@@ -689,8 +710,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getHolding($id, $patron = false)
     {
-
-		$uri = $this->solrService . "?q=bibIdentifier:wbm-" . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
+		
+		$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
+		//var_dump($uri);
+		
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
 		$request->setUri($uri);
@@ -704,9 +727,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             throw new ILSException($e->getMessage());
         }
 		
+		// TODO: reimplement something like this when the API starts returning the proper http status code
+		/* 
 		if (!$response->isSuccess()) {
             throw HttpErrorException::createFromResponse($response);
         }
+		*/
 		
 		$content = $response->getBody();
 		$holdingsJSON = Json::decode($content);
@@ -747,8 +773,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$bibIdentifier = $id;
 				$available = ($status != 'LOANED') ? true:false;
 
-				$item['id'] = str_replace("wbm-","",$bibIdentifier);
-				$item['item_id'] = str_replace("wio-","",$itemIdentifier);
+				$item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
+				$item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
 				$item['availability'] = $available;
 				$item['status'] = $status;
 				$item['location'] = $location;
@@ -824,9 +850,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             throw new ILSException($e->getMessage());
         }
 		
+		// TODO: reimplement something like this when the API starts returning the proper http status code
+		/*
 		if (!$response->isSuccess()) {
             throw HttpErrorException::createFromResponse($response);
         }
+		*/
 		
 		/* TODO: this will always be 201 */
 		$statusCode = $response->getStatusCode();
@@ -992,9 +1021,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				throw new ILSException($e->getMessage());
 			}
 			
+			// TODO: reimplement something like this when the API starts returning the proper http status code
+			/*
 			if (!$response->isSuccess()) {
 				throw HttpErrorException::createFromResponse($response);
 			}
+			*/
 		
 			$content = $response->getBody();
 			$xml = simplexml_load_string($content);
