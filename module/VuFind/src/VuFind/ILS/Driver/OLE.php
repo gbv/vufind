@@ -168,7 +168,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		
         // Define OLE's solr service
         $this->solrService = $this->config['Catalog']['solr_service'];
-		
+
         try {
 			if ($this->dbvendor == 'oracle') {
 				$tns = '(DESCRIPTION=' .
