@@ -110,7 +110,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 	/* TODO Delete
 	protected $record;
 	*/
-	
+	//
 	/**
      * Default pickup location
      *
