@@ -286,7 +286,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getMyProfile($patron)
     {
-		$uri = $this->circService . '?service=lookupUser&patronId=' . $patron['id'] . '&operatorId=dev2';
+		$uri = $this->circService . '?service=lookupUser&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
 
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
@@ -359,15 +359,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getMyTransactions($patron)
     {
-        /*
 
-        Checked out Items
-        ----------------
-        http://localhost:8080/olefs/circulation?service=getCheckedOutItems&patronId=10100055U&operatorId=dev2
-        */
         $transList = array();
 
-		$uri = $this->circService . '?service=getCheckedOutItems&patronId=' . $patron['id'] . '&operatorId=API';
+		$uri = $this->circService . '?service=getCheckedOutItems&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
 		$request->setUri($uri);
@@ -402,6 +397,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$transList[] = $processRow;
 			}
 		}
+		//var_dump($transList);
+		
 		return $transList;
 
     }
@@ -421,15 +418,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 	 
     public function getMyFines($patron)
     {
-		/*
-		http://localhost:8080/olefs/circulation?service=fine&patronId=10100055U&operatorId=dev2
-		*/
 
         $fineList = array();
 
         try {
 			/* TODO: use the zend http service */
-			$xml = simplexml_load_string(file_get_contents($this->circService . '?service=fine&patronId=' . $patron['id'] . '&operatorId=API'));
+			$xml = simplexml_load_string(file_get_contents($this->circService . '?service=fine&patronBarcode=' . $patron['barcode'] . '&operatorId=API'));
 		
             $fines = $xml->xpath('//fineItem');
 
@@ -487,16 +481,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getMyHolds($patron)
     {
-        /*
-        GET
-        ---
-        lample: http://localhost:8080/olefs/circulation?service=holds&patronId=20235562K&operatorId=API
-        */
 
         $holdList = array();
 		
-		$uri = $this->circService . '?service=holds&patronId=' . $patron['id'] . '&operatorId=API';
-		var_dump($uri);
+		$uri = $this->circService . '?service=holds&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+		//var_dump($uri);
 		
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
@@ -522,6 +511,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		
 		$code = $xml->xpath('//code');
 		$code = (string)$code[0][0];
+		
+		//var_dump($code);
+		//var_dump($xml);
 
 		if ($code == '000') {
             $holdItems = $xml->xpath('//hold');
@@ -534,27 +526,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 $holdsList[] = $processRow;
             }
 		}
-		return $transList;
-		
-		/*
-        try {
+		return $holdsList;
 
-			//$xml = simplexml_load_string(file_get_contents($this->circService . '?service=holds&patronId=' . $patron['id'] . '&operatorId=API'));
-			
-            $holdItems = $xml->xpath('//hold');
-			$holdsList = array();
-			
-            foreach($holdItems as $item) {
-                //var_dump($item);
-                $processRow = $this->processMyHoldsData($item, $patron);
-                //var_dump($processRow);
-                $holdsList[] = $processRow;
-            }
-            return $holdsList;
-        } catch (Exception $e) { 
-            throw new ILSException($e->getMessage());
-        }
-		*/
     }
 
     /**
@@ -603,17 +576,24 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         $dueDate = substr((string) $itemXml->dueDate, 0, 10);
         $dueTime = substr((string) $itemXml->dueDate, 11);
-        
+		
+        $loanedDate = substr((string) $itemXml->loanDate, 0, 10);
+        $loanedTime = substr((string) $itemXml->loanDate, 11);
+		
         $dueStatus = ((string) $itemXml->overDue == 'true') ? "overdue" : "";
-        
+        $numberOfRenewals = (string) $itemXml->numberOfRenewals;
+		
         $transactions = array(
             'id' => substr((string) $itemXml->catalogueId, strpos((string) $itemXml->catalogueId, '-')+1),
             'item_id' => (string) $itemXml->itemId,
             'duedate' => $dueDate,
             'dueTime' => $dueTime,
+            'loanedDate' => $loanedDate,
+            'loanedTime' => $loanedTime,
             'dueStatus' => $dueStatus,
             'volume' => '',
             'publication_year' => '',
+			'renew' => $numberOfRenewals,
             'title' => strlen((string) $itemXml->title)
                 ? (string) $itemXml->title : "unknown title"
         );
@@ -633,9 +613,6 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function getRecord($id)
     {
 
-        /*
-        http://localhost:8080/oledocstore/document?docAction=instanceDetails&format=xml&bibIds=1458569
-        */
 		//$uri = $this->docService . '?docAction=instanceDetails&format=xml&bibIds=' . $id;
 		$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "&wt=xml&rows=100000";
 		/* TODO: use the zend http service and throw appropriate exception */
@@ -757,7 +734,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
 		foreach($holdingsJSON->response->docs as $holdingJSON) {
 
-			$location = (string)$holdingJSON->LocationLevel_display[0];
+			$location = (string)$holdingJSON->Location_display[0];
 			$callNumber = (string)$holdingJSON->CallNumber_display[0];
 			$holdingsIdentifier = (string)$holdingJSON->holdingsIdentifier[0];
 			
@@ -833,12 +810,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function placeHold($holdDetails)
 
     {
-		/*		http://localhost:8080/olefs/circulation?service=placeRequest&patronId=20235562K&operatorId=API&itemBarcode=005123641675530699&requestType=Page%2fHold+Request
-				http://localhost:8080/olefs/circulation?service=placeRequest&patronId=10100055U&operatorId=API&itemBarcode=33165972443029224&requestType=Page%2fHold+Request
-		*/
-		
-		var_dump($holdDetails);
-		
+
 		$patron = $holdDetails['patron'];
 		$patronId = $patron['id'];
 		$operatorId = 'API';
@@ -846,10 +818,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		$requestType = 'Page%2fHold+Request';
 		$bibId = $holdDetails['id'];
 		$itemBarcode = $holdDetails['barcode'];
-
-		$uri = $this->circService . "?service={$service}&patronId={$patronId}&operatorId={$operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
+		$patronBarcode = $patron['barcode'];
 		
-		var_dump($uri);
+		$uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
+		
+		//var_dump($uri);
 		
 		$request = new Request();
 		$request->setMethod(Request::METHOD_POST);
@@ -995,20 +968,14 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 	 */
     public function renewMyItems($renewDetails)
 	{
-		/*
-		http://localhost:8080/olefs/circulation?service=renewItem&patronId=10100055U&operatorId=API&itemBarcode=9860950159307095
-		
-		http://localhost:8080/olefs/circulation?service=renewItem&patronId=10100055U&operatorId=API&itemBarcode=005123641675530699
-		
-		*/
-		//var_dump($renewDetails);
-		
+
 		$patron = $renewDetails['patron'];
 		$patronId = $patron['id'];
+		$patronBarcode = $patron['barcode'];
 		
 		// TODO: API account can not renew this item
 		//$operatorId = 'API';
-		$operatorId = 'dev2';
+		$operatorId = 'API';
 		
 		$service = 'renewItem';
 		
@@ -1019,7 +986,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		  $itemBarcode = $details_arr[0];
 		  $item_id = $details_arr[1];
 
-			$uri = $this->circService . "?service={$service}&patronId={$patronId}&operatorId={$operatorId}&itemBarcode={$itemBarcode}";
+			$uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$operatorId}&itemBarcode={$itemBarcode}";
 
 			//var_dump($uri);
 			
