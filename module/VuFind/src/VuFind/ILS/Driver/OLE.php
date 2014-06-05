@@ -420,23 +420,45 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     {
 
         $fineList = array();
+		$transList = $this->getMyTransactions($patron);
 
-        try {
-			/* TODO: use the zend http service */
-			$xml = simplexml_load_string(file_get_contents($this->circService . '?service=fine&patronBarcode=' . $patron['barcode'] . '&operatorId=API'));
+		$uri = $this->circService . '?service=fine&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+		$request = new Request();
+		$request->setMethod(Request::METHOD_GET);
+		$request->setUri($uri);
+
+		$client = new Client();
+		$client->setOptions(array('timeout' => 30));
+
+		try {
+			$response = $client->dispatch($request);
+		} catch (Exception $e) { 
+			throw new ILSException($e->getMessage());
+		}
 		
-            $fines = $xml->xpath('//fineItem');
+		$content_str = $response->getBody();
+		$xml = simplexml_load_string($content_str);
+		
+		$fines = $xml->xpath('//fineItem');
 
-            foreach($fines as $fine) {
-				//var_dump($fine);
-                $processRow = $this->processMyFinesData($fine, $patron);
-				//var_dump($processRow);
-                $fineList[] = $processRow;
-            }
+		foreach($fines as $fine) {
+			//var_dump($fine);
+			$processRow = $this->processMyFinesData($fine, $patron);
+			//var_dump($processRow);
+			
+			if($processRow['id']) {
+				foreach($transList as $trans) {
+					if ($this->bibPrefix . $trans['id'] == $processRow['id']) {
+						$processRow['checkout'] = $trans['loanedDate'];
+						$processRow['duedate'] = $trans['duedate'];
+						$processRow['title'] = $trans['title'];
+						break;
+					}
+				}
+			}
+			$fineList[] = $processRow;
+		}
 
-        } catch (Exception $e) { //TODO: switch this to catch exception thrown by zend http service
-            throw new ILSException($e->getMessage());
-        }
 
 		return $fineList;
 
@@ -459,9 +481,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         return array(
 				 'amount' => (string)$itemXml->amount,
-				 'fine' => '',
+				 'fine' => (string)$itemXml->reason,
 				 'balance' => (string)$itemXml->balance,
-				 'createdate' => '',
+				 'createdate' => (string)$itemXml->dateCharged,
 				 'checkout' => '',
 				 'duedate' => '',
 				 'id' => $recordId
@@ -702,12 +724,16 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function getHolding($id, $patron = false)
     {
 		
-		$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
+		//$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
+		$uri = $this->docService . "/holdings/tree?bibId={$id}";
 		//var_dump($uri);
 		
 		$request = new Request();
 		$request->setMethod(Request::METHOD_GET);
 		$request->setUri($uri);
+		$request->getHeaders()->addHeaders(array(
+			'Accept' => 'application/json'
+		));
 
 		$client = new Client();
 		$client->setOptions(array('timeout' => 30));
@@ -728,41 +754,63 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		$content = $response->getBody();
 		$holdingsJSON = Json::decode($content);
 		
-		//var_dump($holdingsJSON);
+		
 		
 		$items = array();
 
-		foreach($holdingsJSON->response->docs as $holdingJSON) {
-
-			$location = (string)$holdingJSON->Location_display[0];
-			$callNumber = (string)$holdingJSON->CallNumber_display[0];
-			$holdingsIdentifier = (string)$holdingJSON->holdingsIdentifier[0];
+		foreach($holdingsJSON->holdingsTrees as $tree) {
+			//var_dump($holding);
 			
-			$uri = $this->solrService . "?q=holdingsIdentifier:" . $holdingsIdentifier . "%20AND%20DocType:item&wt=json&rows=100000";
-			//$result = file_get_contents($q);
-			$request = new Request();
-			$request->setMethod(Request::METHOD_GET);
-			$request->setUri($uri);
-
-			$client = new Client();
-			$client->setOptions(array('timeout' => 30));
+			$holding = $tree->oleHoldings;
 			
-			$response = $client->dispatch($request);
+			$location = (string)$holding->location->locationLevel->name;
+			$callNumber = (string)$holding->callNumber->number;
+			$holdingsIdentifier = (string)$holding->holdingsIdentifier;
 			
-			$content_str = $response->getBody();
-			$itemsJSON = Json::decode($content_str);
-
-			//var_dump($itemsJSON);
-			
-			foreach($itemsJSON->response->docs as $itemJSON) {
-
-				$itemIdentifier = (string)$itemJSON->itemIdentifier[0];
-				$barcode = (string)$itemJSON->ItemBarcode_display[0];
-				$copyNumber = (string)$itemJSON->CopyNumber_display;
-				$enumeration = (string)$itemJSON->Enumeration_search;
-				$status = (string)$itemJSON->ItemStatus_display[0];
+			foreach($holding->extentOfOwnership as $summary) {
+				//var_dump($summary);
+				
+				$itemIdentifier = "";
+				$barcode = "";
+				$copyNumber = "";
+				$enumeration = "";
+				$status = "AVAILABLE";
 				$bibIdentifier = $id;
 				$available = ($status != 'LOANED') ? true:false;
+
+				//var_dump($summary);
+				$item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
+				$item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
+				$item['availability'] = $available;
+				$item['status'] = $status;
+				$item['location'] = $location;
+				$item['reserve'] = '';
+				$item['callnumber'] = $callNumber;
+				//$item['duedate']
+				$item['returnDate'] = '';
+				$item['number'] = $copyNumber . " : " . $enumeration;
+				$item['requests_placed'] = '';
+				$item['barcode'] = $barcode;
+				$item['notes'] = array($summary->note[0]->value);
+				$item['summary'] = array($summary->textualHoldings);
+				$item['is_holdable'] = true;
+				$item['holdtype'] = 'hold';
+				$item['addLink'] = true;
+				
+				$items[] = $item;
+				
+			}
+
+			foreach($tree->items->item as $oleItem) {
+
+				$itemIdentifier = (string)$oleItem->itemIdentifier;
+				$barcode = (string)$oleItem->accessInformation->barcode;
+				$copyNumber = (string)$oleItem->copyNumber;
+				$enumeration = (string)$oleItem->enumeration;
+				$status = (string)$oleItem->itemStatus->codeValue;
+				$bibIdentifier = $id;
+				$available = ($status == 'AVAILABLE') ? true:false;
+				$holdtype = ($available == true) ? "hold":"recall";
 
 				$item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
 				$item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
@@ -776,21 +824,18 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$item['number'] = $copyNumber . " : " . $enumeration;
 				$item['requests_placed'] = '';
 				$item['barcode'] = $barcode;
-				$item['notes'] = '';
+				$item['notes'] = "";
 				$item['summary'] = '';
 				$item['is_holdable'] = true;
-				$item['holdtype'] = 'hold';
+				$item['holdtype'] = $holdtype;
 				$item['addLink'] = true;
 				
-				//var_dump($item);
-				
 				$items[] = $item;
-
+				
 			}
 
 		}
-		
-		
+
         return $items;
 
     }
@@ -810,12 +855,21 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     public function placeHold($holdDetails)
 
     {
-
+		//Recall/Delivery Request	//Recall Request
+		//Recall/Hold Request		//Recall/Hold Request
+		//Hold/Delivery Request		//Hold Request
+		//Hold/Hold Request			//Hold/Hold Request
+		//Page/Delivery Request		//Page Request
+		//Page/Hold Request			//Page/Hold Request
+		//Copy Request				//Copy Request
+		//In Transit Request		//In Transit Request
+		//ASR Request				//ASR Request
+		
 		$patron = $holdDetails['patron'];
 		$patronId = $patron['id'];
 		$operatorId = 'API';
 		$service = 'placeRequest';
-		$requestType = 'Page%2fHold+Request';
+		$requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Delivery Request');
 		$bibId = $holdDetails['id'];
 		$itemBarcode = $holdDetails['barcode'];
 		$patronBarcode = $patron['barcode'];
@@ -845,14 +899,14 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 		*/
 		
 		/* TODO: this will always be 201 */
-		$statusCode = $response->getStatusCode();
+		//$statusCode = $response->getStatusCode();
 		$content = $response->getBody();
 		
 		$xml = simplexml_load_string($content);
 		$msg = $xml->xpath('//message');
-		
-		/* TODO: this is a hack to get the appropriate boolean response from the service. The circ API always returns 'OK' regardless is the operation was allowed */
-		//$success = (stristr((string)$msg[0], 'succes')) ? true:false;
+		$code = $xml->xpath('//code');
+
+		$success = ((string)$code[0] == '021') ? true:false;
 
 		return $this->returnString($success, (string)$msg[0]);
 
