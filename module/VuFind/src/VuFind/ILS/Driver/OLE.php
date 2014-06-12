@@ -800,9 +800,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$items[] = $item;
 				
 			}
-
+			
 			foreach($tree->items->item as $oleItem) {
-
+				
 				$itemIdentifier = (string)$oleItem->itemIdentifier;
 				$barcode = (string)$oleItem->accessInformation->barcode;
 				$copyNumber = (string)$oleItem->copyNumber;
@@ -811,7 +811,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$bibIdentifier = $id;
 				$available = ($status == 'AVAILABLE') ? true:false;
 				$holdtype = ($available == true) ? "hold":"recall";
-
+				$itemType = trim(explode('-', (string)$oleItem->itemType->fullValue)[1]);
+				
 				$item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
 				$item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
 				$item['availability'] = $available;
@@ -829,13 +830,14 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 				$item['is_holdable'] = true;
 				$item['holdtype'] = $holdtype;
 				$item['addLink'] = true;
+				$item['item_type'] = $itemType;
 				
 				$items[] = $item;
 				
 			}
-
+			
 		}
-
+		
         return $items;
 
     }
