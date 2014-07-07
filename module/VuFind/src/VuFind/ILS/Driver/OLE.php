@@ -87,6 +87,17 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * @var string
      */
     protected $solrService;
+	 
+	/**
+	 * OLE operator for API calls
+	 */
+	protected $operatorId;
+
+	/**
+	 * item_available_code, the value from ole_dlvr_item_avail_stat_t that indicates that an item is available. All other codes are reflect as unavailable.
+	 */
+	protected $item_available_code;
+	
     /**
      * Set the HTTP service to be used for HTTP requests.
      *
@@ -168,7 +179,13 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         
         // Define OLE's solr service
         $this->solrService = $this->config['Catalog']['solr_service'];
-
+		
+        // Define OLE's Circ API operator
+        $this->operatorId = $this->config['Catalog']['operatorId'];
+		
+        // Define OLE's available code status
+        $this->item_available_code = $this->config['Catalog']['item_available_code'];
+		
         try {
             if ($this->dbvendor == 'oracle') {
                 $tns = '(DESCRIPTION=' .
@@ -286,7 +303,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getMyProfile($patron)
     {
-        $uri = $this->circService . '?service=lookupUser&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+        $uri = $this->circService . '?service=lookupUser&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
 
         $request = new Request();
         $request->setMethod(Request::METHOD_GET);
@@ -370,7 +387,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         $transList = array();
 
-        $uri = $this->circService . '?service=getCheckedOutItems&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+        $uri = $this->circService . '?service=getCheckedOutItems&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
         $request = new Request();
         $request->setMethod(Request::METHOD_GET);
         $request->setUri($uri);
@@ -430,7 +447,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $fineList = array();
         $transList = $this->getMyTransactions($patron);
 
-        $uri = $this->circService . '?service=fine&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+        $uri = $this->circService . '?service=fine&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
         $request = new Request();
         $request->setMethod(Request::METHOD_GET);
         $request->setUri($uri);
@@ -515,7 +532,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         $holdList = array();
         
-        $uri = $this->circService . '?service=holds&patronBarcode=' . $patron['barcode'] . '&operatorId=API';
+        $uri = $this->circService . '?service=holds&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
         //var_dump($uri);
         
         $request = new Request();
@@ -685,9 +702,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getItemStatus($itemXML) {
 
-        $status = $itemXML->children('circ', true)->itemStatus->children()->fullValue;
+        $status = $itemXML->children('circ', true)->itemStatus->children()->codeValue;
         // TODO: enable all item statuses
-        $available = ($status != 'LOANED') ? true:false;
+        $available = ($status == $this->item_available_code) ? true:false;
 
         $item['status'] = $status;
         $item['location'] = '';
@@ -814,7 +831,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                     $items['unbound'] = $unboundItem; 
                 }
             }
- 
+			
             foreach($holding->extentOfOwnership as $summary) {
                 //var_dump($summary);
                 
@@ -822,10 +839,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 $barcode = "";
                 $copyNumber = "";
                 $enumeration = "";
-                $status = "AVAILABLE";
                 $bibIdentifier = $id;
-                $available = ($status != 'LOANED') ? true:false;
-
+                //$available = ($status == $this->item_available_code) ? true:false;
+				$available = true;
                 //var_dump($summary);
                 $item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
                 $item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
@@ -855,16 +871,16 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
             
             foreach($tree->items->item as $oleItem) {
-
+				//var_dump($oleItem);
                 $itemIdentifier = (string)$oleItem->itemIdentifier;
                 $barcode = (string)$oleItem->accessInformation->barcode;
                 $copyNumber = (string)$oleItem->copyNumber;
                 $enumeration = (string)$oleItem->enumeration;
                 $status = (string)$oleItem->itemStatus->codeValue;
                 $bibIdentifier = $id;
-                $available = ($status == 'AVAILABLE') ? true:false;
+                $available = ($status == $this->item_available_code) ? true:false;
                 $holdtype = ($available == true) ? "hold":"recall";
-                $itemType = trim(explode('-', (string)$oleItem->itemType->fullValue)[1]);
+                //$itemType = trim(explode('-', (string)$oleItem->itemType->fullValue)[1]);
                 $itemLocation = (isset($oleItem->location->locationLevel->locationLevel->locationLevel->name) ? 
                     $oleItem->location->locationLevel->locationLevel->locationLevel->name : null);
                 $itemLocationCodes = (isset($oleItem->location->locationLevel->code) 
@@ -935,14 +951,13 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         
         $patron = $holdDetails['patron'];
         $patronId = $patron['id'];
-        $operatorId = '11392'; // Temporary fix for recall link. This should be switched back to 'API' when the API Operator ID is ready - brad
         $service = 'placeRequest';
         $requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Delivery Request');
         $bibId = $holdDetails['id'];
         $itemBarcode = $holdDetails['barcode'];
         $patronBarcode = $patron['barcode'];
         
-        $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
+        $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$this->operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
         
         //var_dump($uri);
         
@@ -1095,11 +1110,6 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $patronId = $patron['id'];
         $patronBarcode = $patron['barcode'];
         
-        // TODO: API account can not renew this item
-        //$operatorId = 'API';
-        //$operatorId = '42694';
-        $operatorId = '11392';
-        
         $service = 'renewItem';
         
         $finalResult = array();
@@ -1109,7 +1119,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
           $itemBarcode = $details_arr[0];
           $item_id = $details_arr[1];
 
-            $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$operatorId}&itemBarcode={$itemBarcode}";
+            $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$this->operatorId}&itemBarcode={$itemBarcode}";
 
             //var_dump($uri);
             
