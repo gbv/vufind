@@ -952,7 +952,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $patron = $holdDetails['patron'];
         $patronId = $patron['id'];
         $service = 'placeRequest';
-        $requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Delivery Request');
+        $requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Hold Request');
         $bibId = $holdDetails['id'];
         $itemBarcode = $holdDetails['barcode'];
         $patronBarcode = $patron['barcode'];
