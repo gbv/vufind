@@ -87,17 +87,17 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * @var string
      */
     protected $solrService;
-	 
-	/**
-	 * OLE operator for API calls
-	 */
-	protected $operatorId;
+     
+    /**
+     * OLE operator for API calls
+     */
+    protected $operatorId;
 
-	/**
-	 * item_available_code, the value from ole_dlvr_item_avail_stat_t that indicates that an item is available. All other codes are reflect as unavailable.
-	 */
-	protected $item_available_code;
-	
+    /**
+     * item_available_codes, the value from ole_dlvr_item_avail_stat_t that indicates that an item is available. All other codes are reflect as unavailable.
+     */
+    protected $item_available_codes;
+    
     /**
      * Set the HTTP service to be used for HTTP requests.
      *
@@ -179,13 +179,13 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         
         // Define OLE's solr service
         $this->solrService = $this->config['Catalog']['solr_service'];
-		
+
         // Define OLE's Circ API operator
         $this->operatorId = $this->config['Catalog']['operatorId'];
-		
+        
         // Define OLE's available code status
-        $this->item_available_code = $this->config['Catalog']['item_available_code'];
-		
+        $this->item_available_codes = explode(":", $this->config['Catalog']['item_available_code']);       
+ 
         try {
             if ($this->dbvendor == 'oracle') {
                 $tns = '(DESCRIPTION=' .
@@ -310,7 +310,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $request->setUri($uri);
         
         $client = new Client();
-        $client->setOptions(array('timeout' => 30));
+        $client->setOptions(array('timeout' => 240));
 
         
         try {
@@ -393,7 +393,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $request->setUri($uri);
 
         $client = new Client();
-        $client->setOptions(array('timeout' => 30));
+        $client->setOptions(array('timeout' => 630));
             
         try {
             $response = $client->dispatch($request);
@@ -533,7 +533,6 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $holdList = array();
         
         $uri = $this->circService . '?service=holds&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
-        //var_dump($uri);
         
         $request = new Request();
         $request->setMethod(Request::METHOD_GET);
@@ -591,6 +590,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     {
         $availableDateTime = (string) $itemXml->availableDate;
         $available = ($availableDateTime <= date('Y-m-d')) ? true:false;
+        // JEJ CHANGE
+		// Did the API change to return a string instead of date? (DL)
+        $available = ((string) $itemXml->availableStatus == 'ONHOLD') ?  true:false;
 
         return array(
             'id' => substr((string) $itemXml->catalogueId, strpos((string) $itemXml->catalogueId, '-')+1),
@@ -632,6 +634,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $volume = (string) $itemXml->volumeNumber;
         $copy = (string) $itemXml->copyNumber;
         $numberOfRenewals = (string) $itemXml->numberOfRenewals;
+
+        $callNumber = (string) $itemXml->callNumber;
         
         $transactions = array(
             'id' => substr((string) $itemXml->catalogueId, strpos((string) $itemXml->catalogueId, '-')+1),
@@ -643,6 +647,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             'dueStatus' => $dueStatus,
             'volume' => $volume,
             'copy' => $copy,
+            'callNumber' => $callNumber,
             'publication_year' => '',
             'renew' => $numberOfRenewals,
             'title' => strlen((string) $itemXml->title)
@@ -690,9 +695,50 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getStatus($id)
     {
-        $items = array();
-        $items = $this->getHolding($id);
+        $sql = 'SELECT DISTINCT loc.LOCN_NAME AS locn_name, 
+                    h.LOCATION AS holdings_locn_code, h.call_number_prefix AS holding_call_number_prefix, h.call_number AS holding_call_number, 
+                    i.LOCATION AS item_locn_code, i.call_number_prefix AS item_call_number_prefix, i.call_number AS item_call_number, i.COPY_NUMBER AS item_copy_number,
+                    status.ITEM_AVAIL_STAT_CD AS item_status_code, status.ITEM_AVAIL_STAT_NM AS item_status_name
+                FROM ole_ds_holdings_t h
+                    JOIN ole_ds_item_t i ON h.HOLDINGS_ID = i.HOLDINGS_ID
+                    JOIN ole_dlvr_item_avail_stat_t status ON i.ITEM_STATUS_ID=status.ITEM_AVAIL_STAT_ID
+                LEFT JOIN ole_locn_t loc ON loc.LOCN_CD = if(i.LOCATION is not NULL && length(i.LOCATION) > 0, SUBSTRING_INDEX(i.LOCATION, \'/\', -1), SUBSTRING_INDEX(h.LOCATION, \'/\', -1))
+                    WHERE h.STAFF_ONLY = "N"
+                        AND i.STAFF_ONLY = "N"
+                        AND h.BIB_ID = :id';
 
+        try {
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':id' => $id));
+ 
+            /*Build the return array*/
+            $items = array();
+            while ($row = $stmt->fetch()) {
+                $item = array();
+ 
+                /*Set convenience variables.*/
+                $status = $row['item_status_code'];
+                $available = (in_array($status, $this->item_available_codes) ? true:false);
+                $location = $row['locn_name'];
+
+                /*Build item array*/ 
+                $item['id'] = $id;
+                $item['status'] = $status;
+                $item['location'] = $row['locn_name'];
+                $item['reserve'] = 'N';
+                $item['callnumber'] = (string) $row[2] . ' ' . $row['holding_call_number'];
+                $item['availability'] = $available;
+                if ($item['status'] == 'ANAL') {
+                    $item['availability'] = null;
+                }
+
+                $items[] = $item; 
+            }
+        }
+        catch (Exception $e){
+            /*Do nothing*/
+        }
         return $items;
     }
     
@@ -704,7 +750,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         $status = $itemXML->children('circ', true)->itemStatus->children()->codeValue;
         // TODO: enable all item statuses
-        $available = ($status == $this->item_available_code) ? true:false;
+        $available = (in_array($status, $this->item_available_codes)) ? true:false;
 
         $item['status'] = $status;
         $item['location'] = '';
@@ -734,6 +780,281 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         return $status;
     }
 
+    /**
+     *
+     */
+    protected function getItems($id, $holdingId, $holdingLocation, $holdingLocCodes, $holdingCallNum, $holdingCallNumDisplay) {
+
+        /*Bet items by holding id*/
+        $sql = 'SELECT i.ITEM_ID AS item_id, i.HOLDINGS_ID AS holdings_id, i.BARCODE AS barcode, i.URI AS uri, 
+                    i.ITEM_TYPE_ID AS item_type_id, i.TEMP_ITEM_TYPE_ID as temp_item_type_id, 
+                    itype.ITM_TYP_CD AS itype_code, itype.ITM_TYP_NM AS itype_name, 
+                    istat.ITEM_AVAIL_STAT_CD AS status_code, istat.ITEM_AVAIL_STAT_NM AS status_name,
+                    i.LOCATION AS location, loc.LOCN_NAME AS locn_name,
+                    i.CALL_NUMBER_TYPE_ID, i.CALL_NUMBER_PREFIX, i.CALL_NUMBER, i.ENUMERATION, i.CHRONOLOGY, i.COPY_NUMBER, 
+                    i.DUE_DATE_TIME, i.CHECK_OUT_DATE_TIME, i.CLAIMS_RETURNED,
+                    CONCAT_WS(";", (SELECT inote.NOTE
+                        FROM ole_ds_item_note_t inote
+                        WHERE i.ITEM_ID = inote.ITEM_ID
+                        AND inote.TYPE="public")
+                    ) AS note 
+                        FROM ole_ds_item_t i
+                    LEFT JOIN ole_dlvr_item_avail_stat_t istat on i.ITEM_STATUS_ID = istat.ITEM_AVAIL_STAT_ID
+                    LEFT JOIN ole_cat_itm_typ_t itype on if(i.TEMP_ITEM_TYPE_ID is not null, i.TEMP_ITEM_TYPE_ID, i.ITEM_TYPE_ID) = itype.ITM_TYP_CD_ID
+                    LEFT JOIN ole_locn_t loc on loc.LOCN_CD = SUBSTRING_INDEX(i.LOCATION, \'/\', -1)
+                        WHERE i.STAFF_ONLY = \'N\'
+                            AND i.HOLDINGS_ID = :holdingId';
+
+
+        try {
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':holdingId' => $holdingId));
+
+            /*Return array*/
+            $items = array();
+            while ($row = $stmt->fetch()) {
+                $item = array();
+                //print_r($row);
+ 
+                /*Set convenience variables.*/
+                $status = $row['status_code'];
+                $available = (in_array($status, $this->item_available_codes) ? true:false);
+                $copyNum = $row['COPY_NUMBER'];
+                $enumeration = $row['ENUMERATION'];
+                $itemCallNumDisplay = (isset($row['CALL_NUMBER']) ? trim($row['CALL_NUMBER_PREFIX'] . ' ' .$row['CALL_NUMBER']) : null);
+                $itemCallNum = (isset($row['CALL_NUMBER']) ? trim($row['CALL_NUMBER']) : null);
+                $holdtype = ($available == true) ? "hold":"recall";
+                $itemTypeArray = ($row['itype_name'] ? explode('-', $row['itype_name']) : array());
+                $itemTypeName = trim($itemTypeArray[1]);
+                $itemLocation = $row['locn_name'];
+                $itemLocCodes = $row['location'];
+                              
+                /*Build the items*/ 
+                $item['id'] = $id;
+                $item['availability'] = $available;
+                $item['status'] = $status;
+                $item['location'] = (!empty($itemLocation) ? $itemLocation : $holdingLocation);
+                $item['reserve'] = '';
+                $item['callnumber'] = (!empty($itemCallNum) ? $itemCallNum : $holdingCallNum);
+                $item['duedate'] = (isset($row['DUE_DATE_TIME']) ? $row['DUE_DATE_TIME'] : 'Indefinite') ;
+                $item['returnDate'] = '';
+                $item['number'] = $copyNum . ' : ' . $enumeration;
+                $item['requests_placed'] = '';
+                $item['barcode'] = $row['barcode'];
+                $item['item_id'] = $row['item_id'];
+                $item['is_holdable'] = true;
+                $item['itemNotes'] = $row['note'];
+                $item['holdtype'] = $holdtype;
+                /*UChicago specific?*/
+                $item['claimsReturned'] = ($row['CLAIMS_RETURNED'] == 'Y' ? true : false);
+                $item['sort'] = preg_replace('/[^[:digit:]]/','', $copyNum) .  preg_replace('/[^[:digit:]]/','', array_shift(preg_split('/[\s-]/', $enumeration)));
+                $item['itemTypeCode'] = $row['itype_code'];
+                $item['itemTypeName'] = $itemTypeName;
+                $item['callnumberDisplay'] = (!empty($itemCallNumDisplay) ? $itemCallNumDisplay : $holdingCallNumDisplay);
+                $item['locationCodes'] = (!empty($itemLocCodes) ? $itemLocCodes : $holdingLocCodes);
+    
+                $items[] = $item;
+            }
+        }
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+        /*Sort numerically by copy/volume number.*/
+        usort($items, function($a, $b) { return OLE::cmp($a['sort'], $b['sort']); });
+        return $items;
+    }
+
+    /**
+     * A trivial helper method used in getItems as a comparison 
+     * callback for usort in ordering item lists by a definied 
+     * sort key. This should be removed, along with usort and 
+     * the $item['sort'] key in getItems once the DB is returning 
+     * things in the proper order.
+     *
+     * @param $a string, formatted copy/volume numbers in the 
+     * $item['sort'] key for each item in he items array.
+     * @param $b same as $a
+     *
+     * returns -1, 0, or 1
+     */
+    public function cmp($a, $b) {
+        if ($a == $b) {
+            return 0;
+        }
+        return ($a < $b) ? -1 : 1;
+    }
+
+    /**
+     * Get Summary of Holdings
+     *
+     * Gets the extent of ownership information from OLE.
+     *
+     * @param string $id the record id.
+     * @param string $holdingId holding specific identifier.
+     * @param string $location the holding location.
+     *
+     * @return array of summary data for a specific holding.
+     */
+    protected function getSummaryHoldings($id, $holdingId, $location) {
+        /*Get extent of ownership by bib id*/
+        $sql = 'SELECT own.EXT_OWNERSHIP_ID, own.HOLDINGS_ID,
+                   ot.TYPE_OWNERSHIP_NM,
+                   own.ORD, own.TEXT,
+                   CONCAT_WS(\';\', (SELECT note.NOTE
+                    from ole_ds_ext_ownership_note_t note 
+                    where note.EXT_OWNERSHIP_ID = own.EXT_OWNERSHIP_ID
+                    and note.TYPE = \'public\'
+                    )) AS note
+                    FROM ole_ds_ext_ownership_t own
+                JOIN ole_ds_holdings_t h ON own.HOLDINGS_ID = h.HOLDINGS_ID
+                LEFT JOIN ole_cat_type_ownership_t ot ON own.EXT_OWNERSHIP_TYPE_ID = ot.TYPE_OWNERSHIP_ID
+                    WHERE h.STAFF_ONLY = "N"
+                        AND h.BIB_ID = :id ORDER BY own.HOLDINGS_ID, ot.TYPE_OWNERSHIP_ID, own.ORD';
+
+        try {
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':id' => $id));
+            
+            /*Return array*/
+            $summaryHoldings = array();
+            while ($row = $stmt->fetch()) {
+                //print_r($row);
+                $summary = array();
+                if ($holdingId == $row['HOLDINGS_ID']) { 
+                    //Convienence variables
+                    $summaryType = $row['TYPE_OWNERSHIP_NM'];
+
+                    $summary['id'] = $id;
+                    $summary['location'] = $location;
+                    //$summary['notes'] = array($summary->note[0]->value);
+                    //$summary['summary'] = array($summary->textualHoldings);
+                    $summary['libraryHas'] = ($summaryType == 'Basic Bibliographic Unit' ? array($row['TEXT'], $row['note']) : null);
+                    $summary['indexes'] =  ($summaryType == 'Indexes' ? array($row['TEXT'], $row['note']) : null);
+                    $summary['supplements'] = ($summaryType == 'Supplementary Material' ? array($row['TEXT'], $row['note']) : null);
+                    $summary['availability'] = true;
+                    $summary['status'] = '';
+                    $summary['is_holdable'] = true;
+                }
+                if (!empty($summary)) {
+                    $summaryHoldings[] = $summary;
+                }
+            }
+        }
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+
+        //var_dump($summaryHoldings);
+        return $summaryHoldings;
+
+    }
+
+    /**
+     * Get E-Holdings 
+     *
+     * Gets the e-holdings.
+     *
+     * @param string $id the record id.
+     * @param string $holdingId holding specific identifier.
+     * @param string $location the holding location.
+     *
+     * @return array of eholdings represented as "items".
+     */
+    protected function getEholdings($id, $holdingId, $holdingLocation, $holdingCallNum, $holdingCallNumDisplay) {
+        $sql = 'SELECT u.HOLDINGS_ID AS holdings_id, u.URI AS uri, u.TEXT AS text
+                    FROM ole_ds_holdings_uri_t u
+                        WHERE u.HOLDINGS_ID = :holdingId';
+
+         try {
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':holdingId' => $holdingId));
+
+            /*Return array*/
+            $eHoldings = array();
+            while ($row = $stmt->fetch()) {
+                $item = array();
+
+                if (!empty($row['uri'])) {
+                    $item['id'] = $id;
+                    $item['location'] = $holdingLocation;
+                    $item['availability'] = true;
+                    $item['status'] = 'AVAILABLE';
+                    $item['eHolding'] = array('text' => $row['text'], 'uri' => $row['uri']);
+                    $item['callnumber'] = $holdingCallNum;
+                    /*UChicago Specific?*/
+                    $item['callnumberDisplay'] = $holdingCallNumDisplay;
+                }
+
+                if (!empty($item)) {
+                    $eHoldings[] = $item;
+                }
+            }
+        }
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+        return $eHoldings;
+    }
+
+
+    /**
+     * Get unbound periodicals and recently received items.
+     *
+     * @param string $id the record id.
+     * @param string $holdingId holding specific identifier.
+     * @param string $holdingLocation the holding location.
+     *
+     * @returns an array of item information for things without a barcode.
+     */
+    protected function getSerialReceiving($id, $holdingId, $holdingLocation) {
+        /*Get serial receiving data (unbound periodicals) by holdingId*/
+        $sql = 'SELECT r.INSTANCE_ID, s.SER_RCPT_HIS_REC_ID, s.SER_RCV_REC_ID, s.RCV_REC_TYP,
+                   CONCAT_WS(" ", s.ENUM_LVL_1, s.ENUM_LVL_2, s.ENUM_LVL_3, s.ENUM_LVL_4, s.ENUM_LVL_5, s.ENUM_LVL_6) AS enum,
+                   if(LEFT(s.CHRON_LVL_1,1)=\'(\' || LENGTH(s.CHRON_LVL_1) = 0, 
+                      s.CHRON_LVL_1, 
+                      CONCAT(\'(\', CONCAT_WS(": ", s.CHRON_LVL_1, CONCAT_WS(" ", s.CHRON_LVL_2, s.CHRON_LVL_3, s.CHRON_LVL_4)), \')\')
+                   ) AS chron,
+                   s.SER_RCPT_NOTE, 
+                   s.PUB_RCPT AS note
+                    FROM ole_ser_rcv_his_rec s
+                JOIN ole_ser_rcv_rec r ON r.SER_RCV_REC_ID = s.SER_RCV_REC_ID
+                    where s.PUB_DISPLAY = "Y"
+                        and r.INSTANCE_ID = :holdingId';
+       
+        /*Return array*/
+        $items = array();
+
+        try {
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':holdingId' => $this->holdingPrefix . $holdingId));
+
+            while ($row = $stmt->fetch()) {
+                //print_r($row);
+                $item = array();
+
+                    $item['id'] = $id;
+                    $item['location'] = $holdingLocation;
+                    $item['availability'] = true;
+                    $item['status'] = 'AVAILABLE';
+                    $item['unbound'] = $row['enum'] . $row['chron'];
+                    $item['note'] = $row['note'];
+                if (!empty($item)) {
+                    $items[] = $item;
+                }
+            }
+        }
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+        //print_r($items);
+        return $items;
+
+    }
+
 
     /**
      * Get Holding
@@ -752,177 +1073,113 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getHolding($id, $patron = false)
     {
-        
-        //$uri = $this->solrService . "?q=bibIdentifier:" . $this->bibPrefix . $id . "%20AND%20DocType:holdings&wt=json&rows=100000";
-        $uri = $this->docService . "/holdings/tree?bibId={$id}";
-        //var_dump($uri);
-        
-        $request = new Request();
-        $request->setMethod(Request::METHOD_GET);
-        $request->setUri($uri);
-        $request->getHeaders()->addHeaders(array(
-            'Accept' => 'application/json'
-        ));
+        /*Get holdings by bib id, with holdings notes.*/
+        $sql = 'SELECT h.HOLDINGS_ID AS holdings_id, h.BIB_ID AS bib_id, h.location AS
+                location, loc.LOCN_NAME AS locn_name, 
+                       h.CALL_NUMBER_PREFIX AS call_number_prefix, h.CALL_NUMBER AS
+                call_number, h.COPY_NUMBER AS copy_number,
+                       CONCAT_WS(";", (SELECT note.NOTE
+                        FROM ole_ds_holdings_note_t note
+                        WHERE note.HOLDINGS_ID = h.HOLDINGS_ID
+                        AND note.TYPE="public"
+                       )) AS note,
+                       (SELECT count(*) 
+                        FROM ole_ds_ext_ownership_t own 
+                        WHERE own.HOLDINGS_ID = h.HOLDINGS_ID
+                        ) AS ext_ownership_count,
+                       (SELECT count(*) 
+                        FROM ole_ser_rcv_rec r
+                        WHERE r.INSTANCE_ID = CONCAT("who-", h.HOLDINGS_ID)
+                        ) AS ser_rcv_rec_count,
+                       (SELECT count(*)
+                        FROM ole_ds_holdings_uri_t uri
+                        WHERE uri.HOLDINGS_ID = h.HOLDINGS_ID
+                        ) AS uri_count
+                    FROM ole_ds_holdings_t h
+                    LEFT JOIN ole_locn_t loc on loc.LOCN_CD = SUBSTRING_INDEX(h.LOCATION, \'/\',
+                -1)
+                    WHERE h.STAFF_ONLY = "N"
+                    AND h.BIB_ID = :id';
 
-        $client = new Client();
-        $client->setOptions(array('timeout' => 30));
-        
         try {
-            $response = $client->dispatch($request);
-        } catch (Exception $e) { 
-            throw new ILSException($e->getMessage());
-        }
-        
-        // TODO: reimplement something like this when the API starts returning the proper http status code
-        /* 
-        if (!$response->isSuccess()) {
-            throw HttpErrorException::createFromResponse($response);
-        }
-        */
-        
-        $content = $response->getBody();
-        //$holdingsJSON = Json::decode($content);
-         
-        
-        //Temporary fix, prevents the driver from choking on bad json from OLE 
-        try {
-            $holdingsJSON = Json::decode($content);
-        } catch (Exception $e) { 
-            error_log("Oooooops! Bad json data:");
-            error_log($uri);
-        } 
-        
-        $items = array();
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':id' => $id));
 
-        foreach($holdingsJSON->holdingsTrees as $tree) {
-            //var_dump($holding);
-            
-            $holding = $tree->oleHoldings;
-            
-            $shelvingLocation = (string)$holding->location->locationLevel->locationLevel->locationLevel->code;
-            $buildingLocation = (string)$holding->location->locationLevel->locationLevel->code;
-            $institutionLocation = (string)$holding->location->locationLevel->code;
-            $location = (string)$holding->location->locationLevel->locationLevel->locationLevel->name;
-            $locationCodes = $institutionLocation  . '/' . $buildingLocation . '/' . $shelvingLocation;
+            /*Final return array*/
+            $items = array();
+            while ($row = $stmt->fetch()) {
+                /*Array for item data*/
+                $item = array();
+                //print_r($row);
 
-            $callNumber = (string)$holding->callNumber->number;
-            $holdingsIdentifier = (string)$holding->holdingsIdentifier;
+                /*Convenience variables.*/
+                $shelvingLocation = $row['locn_name'];
+                $holdingCallNum = trim($row['call_number']);
+                $holdingCallNumDisplay = trim($row['call_number_prefix'] . ' ' . $row['call_number']);
+                $hasExtOwnership = intval($row['ext_ownership_count']) > 0;
+                $hasEholdings = intval($row['uri_count']) > 0;
+                $hasUnboundItems = intval($row['ser_rcv_rec_count']) > 0;
+                $holdingId = $row['holdings_id'];
+                $locationCodes = $row['location'];
 
-            //Holdings level notes
-            foreach ($holding->note as $note) {
-                if ($note->type == 'public') {
-                    $item['holdingsNotes'] = (string) $note->value;
-                }
-            }
-
-            //Unbound items 
-            foreach($holding as $unbound) {
-                if (isset($unbound->unboundLocation)){  
-                    $unboundItem['location'] = $unbound->unboundLocation;
-                    $unboundItem['callnumber'] = $callNumber;
-                    foreach($unbound->serialReceivingHistory->mains->main as $unboundSummary) {
-                        if (empty($unboundItem['unbound'])) {
-                            $unboundItem['unbound'] = array($unboundSummary->enumerationCaption . $unboundSummary->chronologyCaption);
-                        } 
-                        else {
-                            $unboundItem['unbound'] = array_merge($unboundItem['unbound'], array($unboundSummary->enumerationCaption . $unboundSummary->chronologyCaption));
-                        }
+                /*Get e-holdings if they exist*/
+                if ($hasEholdings) {
+                    $eHoldings = $this->getEholdings($id, $holdingId, end(explode('/', $locationCodes)), $holdingCallNum, $holdingCallNumDisplay);
+                    foreach ($eHoldings as $eHolding) {
+                        $items[] = $eHolding;
                     }
-                    $items['unbound'] = $unboundItem; 
                 }
-            }
-			
-            foreach($holding->extentOfOwnership as $summary) {
-                //var_dump($summary);
                 
-                $itemIdentifier = "";
-                $barcode = "";
-                $copyNumber = "";
-                $enumeration = "";
-                $bibIdentifier = $id;
-                //$available = ($status == $this->item_available_code) ? true:false;
-				$available = true;
-                //var_dump($summary);
-                $item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
-                $item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
-                $item['availability'] = $available;
-                $item['status'] = $status;
-                $item['location'] = $location;
-                $item['locationCodes'] = $locationCodes;
-                $item['reserve'] = '';
-                $item['callnumber'] = $callNumber;
-                //$item['duedate']
-                $item['returnDate'] = '';
-                $item['number'] = $copyNumber . " : " . $enumeration;
-                $item['requests_placed'] = '';
-                $item['barcode'] = $barcode;
-                //$item['notes'] = array($summary->note[0]->value); 
-                //$item['summary'] = array($summary->textualHoldings);
-                $item['libraryHas'] = ($summary->type == 'Basic Bibliographic Unit' ? $summary->textualHoldings : null);
-                $item['indexes'] = ($summary->type == 'Indexes' ? array($summary->textualHoldings, ($summary->note[0]->type == 'public' ? $summary->note[0]->value : null)) : '');
-                $item['supplements'] = ($summary->type == 'Supplementary Material' ? array($summary->textualHoldings, ($summary->note[0]->type == 'public' ? $summary->note[0]->value : null)) : '');
-                $item['is_holdable'] = true;
-                $item['holdtype'] = 'hold';
-                $item['addLink'] = true;
-                
-                $items[] = $item;
-                
-            }
-
-            
-            foreach($tree->items->item as $oleItem) {
-				//var_dump($oleItem);
-                $itemIdentifier = (string)$oleItem->itemIdentifier;
-                $barcode = (string)$oleItem->accessInformation->barcode;
-                $copyNumber = (string)$oleItem->copyNumber;
-                $enumeration = (string)$oleItem->enumeration;
-                $status = (string)$oleItem->itemStatus->codeValue;
-                $bibIdentifier = $id;
-                $available = ($status == $this->item_available_code) ? true:false;
-                $holdtype = ($available == true) ? "hold":"recall";
-                //$itemType = trim(explode('-', (string)$oleItem->itemType->fullValue)[1]);
-                $itemLocation = (isset($oleItem->location->locationLevel->locationLevel->locationLevel->name) ? 
-                    $oleItem->location->locationLevel->locationLevel->locationLevel->name : null);
-                $itemLocationCodes = (isset($oleItem->location->locationLevel->code) 
-                    ? (string)$oleItem->location->locationLevel->code . '/' 
-                    . $oleItem->location->locationLevel->locationLevel->code . '/' 
-                    . $oleItem->location->locationLevel->locationLevel->locationLevel->code : null);
-                $claimsReturned = $oleItem->claimsReturnedFlag;
-
-                if ($oleItem->staffOnlyFlag != 'true') {
-
-                    $item['id'] = str_replace($this->bibPrefix,"",$bibIdentifier);
-                    $item['item_id'] = str_replace($this->itemPrefix,"",$itemIdentifier);
-                    $item['availability'] = $available;
-                    $item['status'] = $status;
-                    $item['location'] = (!empty($itemLocation) && $itemLocation != $location ? $itemLocation : $location);
-                    $item['locationCodes'] = (!empty($itemLocationCodes)  && $itemLocationCode != $locationCodes ? $itemLocationCodes : $locationCodes);
-                    $item['reserve'] = '';
-                    $item['callnumber'] = $callNumber;
-                    //$item['duedate']
-                    $item['returnDate'] = '';
-                    $item['number'] = $copyNumber . " : " . $enumeration;
-                    $item['requests_placed'] = '';
-                    $item['barcode'] = $barcode;
-                    //$item['notes'] = "";
-                    $item['itemNotes'] = ($oleItem->note && $oleItem->note[0]->type == 'public' ? $oleItem->note[0]->value : '');
-                    $item['summary'] = '';
+                /*Build a mock item for each of the holdings*/
+                if (!empty($shelvingLocation)) {
+                    $item['id'] = $id; 
+                    $item['location'] = $shelvingLocation; 
+                    $item['callnumber'] = $holdingCallNum;
+                    $item['holdingsNotes'] = $row['note'];
+                    $item['availability'] = true;
+                    $item['status'] = '';
                     $item['is_holdable'] = true;
-                    $item['holdtype'] = $holdtype;
-                    $item['addLink'] = true;
-                    $item['item_type'] = $itemType;
-                    $item['claimsReturned'] = $claimsReturned;
+                    /*UChicago Specific?*/
+                    $item['callnumberDisplay'] = $holdingCallNumDisplay;
+                    $item['locationCodes'] = $locationCodes;
+
+                    /*Add mock items to the final return array*/
+                    $items[] = $item;
                 }
-                    
-                $items[] = $item;
-                
+
+                /*Get summary holdigns and extent of ownership*/
+                if ($hasExtOwnership) {
+                    $summaryHoldings = $this->getSummaryHoldings($id, $holdingId, $shelvingLocation);
+                    foreach($summaryHoldings as $summary) {
+                        $items[] = $summary;
+                    }                    
+                } 
+
+                /*Get individual item data*/           
+                $oleItems = $this->getItems($id, $holdingId, $shelvingLocation, $locationCodes, $holdingCallNum, $holdingCallNumDisplay);
+                foreach($oleItems as $oleItem) {
+                    $items[] = $oleItem;
+                }
+
+                /*Get serials receiving data*/
+                if ($hasUnboundItems) {
+                    $unboundSerials = $this->getSerialReceiving($id, $holdingId, $shelvingLocation);
+                    foreach($unboundSerials as $unboundItem) {
+                        $items[] = $unboundItem;
+                    }
+                }
             }
 
         }
-
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+        
+        //print_r($items);
         return $items;
-
     }
+
     /**
      * Place Hold
      *
@@ -952,13 +1209,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $patron = $holdDetails['patron'];
         $patronId = $patron['id'];
         $service = 'placeRequest';
-        $requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Hold Request');
+        $requestType = ($holdDetails['holdtype'] == "recall") ? urlencode('Recall/Hold Request'):urlencode('Hold/Delivery Request');
         $bibId = $holdDetails['id'];
         $itemBarcode = $holdDetails['barcode'];
         $patronBarcode = $patron['barcode'];
         
         $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$this->operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
-        
         //var_dump($uri);
         
         $request = new Request();
@@ -1121,8 +1377,6 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
             $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$this->operatorId}&itemBarcode={$itemBarcode}";
 
-            //var_dump($uri);
-            
             $request = new Request();
             $request->setMethod(Request::METHOD_POST);
             $request->setUri($uri);
