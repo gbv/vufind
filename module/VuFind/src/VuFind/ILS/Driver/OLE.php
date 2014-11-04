@@ -99,6 +99,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     protected $item_available_codes;
     
     /**
+     * OLE's default sort for checked out items in user account section. 
+     */
+    protected $coiSort;
+    
+    /**
      * Set the HTTP service to be used for HTTP requests.
      *
      * @param HttpServiceInterface $service HTTP service
@@ -185,6 +190,9 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         
         // Define OLE's available code status
         $this->item_available_codes = explode(":", $this->config['Catalog']['item_available_code']);       
+ 
+        // Define OLE's default sort for checked out items 
+        $this->coiSort = $this->config['UserAccount']['checkedOutItemsSort'];
  
         try {
             if ($this->dbvendor == 'oracle') {
@@ -382,50 +390,66 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * @throws ILSException
      * @return array        Array of the patron's transactions on success.
      */
-    public function getMyTransactions($patron)
-    {
-
+    public function getMyTransactions($patron){
+        /*Return array*/
         $transList = array();
-
-        $uri = $this->circService . '?service=getCheckedOutItems&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
-        $request = new Request();
-        $request->setMethod(Request::METHOD_GET);
-        $request->setUri($uri);
-
-        $client = new Client();
-        $client->setOptions(array('timeout' => 630));
-            
+        $sql = 'SELECT p.id AS patron_id, p.first_name AS first_name, p.last_name AS last_name, p.library_id AS library_id,
+                    p.user_name AS user_name, p.email_address AS email_address,
+                    l.ITM_ID AS item_id, i.HOLDINGS_ID AS holdings_id, h.BIB_ID AS bib_num, i.CURRENT_BORROWER AS borrower,
+                    i.DUE_DATE_TIME AS duedate, l.CRTE_DT_TIME AS loaned_date, i.ITEM_STATUS_ID AS item_status_id,
+                    l.NUM_OVERDUE_NOTICES_SENT AS overdue_notices_count, i.COPY_NUMBER AS copy_number, i.ENUMERATION AS enumeration,
+                    i.CHRONOLOGY AS chronology, h.CALL_NUMBER_PREFIX AS call_number_prefix, h.CALL_NUMBER AS call_number, 
+                    h.IMPRINT AS imprint, bib.CONTENT AS bib_data, i.BARCODE AS barcode,
+                    l.NUM_RENEWALS AS number_of_renewals
+                FROM uc_people p
+                JOIN ole_dlvr_loan_t l ON p.id = l.OLE_PTRN_ID
+                JOIN ole_ds_item_t i ON i.BARCODE = l.ITM_ID
+                JOIN ole_ds_holdings_t h ON i.HOLDINGS_ID = h.HOLDINGS_ID
+                JOIN ole_ds_bib_t bib ON bib.BIB_ID = h.BIB_ID
+                    WHERE p.library_id = :barcode 
+                        AND i.CURRENT_BORROWER = p.id';
         try {
-            $response = $client->dispatch($request);
-        } catch (Exception $e) { 
-            throw new ILSException($e->getMessage());
-        }
-
-        // TODO: reimplement something like this when the API starts returning the proper http status code
-        /*
-        if (!$response->isSuccess()) {
-            throw HttpErrorException::createFromResponse($response);
-        }
-        */
-        
-        $content_str = $response->getBody();
-        $xml = simplexml_load_string($content_str);
-        
-        $code = $xml->xpath('//code');
-        $code = (string)$code[0][0];
-
-        if ($code == '000') {
-            $checkedOutItems = $xml->xpath('//checkOutItem');
+            /*Query the database*/
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array(':barcode' => $patron['barcode']));
             
-            foreach($checkedOutItems as $item) {
-                $processRow = $this->processMyTransactionsData($item, $patron);
+            while ($row = $stmt->fetch()) {
+                $processRow = $this->processMyTransactionsData($row, $patron);
                 $transList[] = $processRow;
             }
         }
-        //var_dump($transList);
+        catch (Exception $e){
+            /*Do nothing*/
+        }
+
+        /*Set the default sort order for checked out items.*/
+        switch ($this->coiSort) {
+            case 'dueDate':
+                /*By duedate*/
+                uasort($transList, function($a, $b) { return OLE::cmp(OLE::sortDate($a['duedate']), OLE::sortDate($b['duedate'])); });
+                break;
+            case 'loanedDate' :
+                /*By date checked out*/
+                uasort($transList, function($a, $b) { return OLE::cmp(OLE::sortDate($a['loanedDate']), OLE::sortDate($b['loanedDate'])); });
+                break;
+            default:
+                /*Alphabetical*/
+                usort($transList, function($a, $b){ return strcasecmp(preg_replace('/[^ \w]+/', '', $a['title']), preg_replace('/[^ \w]+/', '', $b['title'])); });
+        }
         
         return $transList;
+    }
 
+    /**
+     * Converts a date into a sortable date.
+     *
+     * @param string, $date a date string to be formatted.
+     *
+     * @returns, integer date in sortable fashion 
+     * e.g. 20141023
+     */
+    public function sortDate($date) {
+        return date('Ynj', strtotime($date));
     }
     
     /**
@@ -500,7 +524,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     protected function processMyFinesData($itemXml, $patron = false)
     {
 
-        $recordId = (string)$itemXml->catalogueId;
+        $recordId = (substr((string)$itemXml->catalogueId, 0, 4) == $this->bibPrefix ? substr((string)$itemXml->catalogueId, 4) : (string)$itemXml->catalogueId);
         
         $record = $this->getRecord($recordId);
 
@@ -615,56 +639,61 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
     /**
      * Protected support method for getMyTransactions.
      *
-     * @param array $itemXml simplexml object of item data
+     * @param array $row data from the database
      * @param array $patron array
      *
      * @throws DateException - TODO
      * @return array Keyed data for display by template files
      */
-    protected function processMyTransactionsData($itemXml, $patron = false)
+    protected function processMyTransactionsData($row, $patron = false)
     {
+        $dateFormat = 'n/j/Y';
+        $dueDate = substr((string) $row['duedate'], 0, 10);
+        $dueTime = substr((string) $row['duedate'], 11);
 
-        $dueDate = substr((string) $itemXml->dueDate, 0, 10);
-        $dueTime = substr((string) $itemXml->dueDate, 11);
-        
-        $loanedDate = substr((string) $itemXml->loanDate, 0, 10);
-        $loanedTime = substr((string) $itemXml->loanDate, 11);
-        
-        $dueStatus = ((string) $itemXml->overDue == 'true') ? "overdue" : "";
-        $volume = (string) $itemXml->volumeNumber;
-        $copy = (string) $itemXml->copyNumber;
-        $numberOfRenewals = (string) $itemXml->numberOfRenewals;
+        $loanedDate = substr((string) $row['loaned_date'], 0, 10);
+        $loanedTime = substr((string) $row['loaned_date'], 11);
 
-        $callNumber = (string) $itemXml->callNumber;
+        $dueStatus = ($row['overdue_notices_count'] > 0) ? "overdue" : "";
+        
+        $xml = simplexml_load_string($row['bib_data']);
+        
+        $title = ''; 
+        foreach($xml->record->xpath('*') as $field) {
+            if ($field->attributes() == '245') {
+                $title = (string) $field->subfield;
+            }
+        }
+
+        /*See if item is on indefinite loan.*/
+        $isIndefiniteLoan = strlen($dueDate) < 1;
         
         $transactions = array(
-            'id' => substr((string) $itemXml->catalogueId, strpos((string) $itemXml->catalogueId, '-')+1),
-            'item_id' => (string) $itemXml->itemId,
-            'duedate' => $dueDate,
-            'dueTime' => $dueTime,
-            'loanedDate' => $loanedDate,
+            'id' => $row['bib_num'],
+            'item_id' => $row['item_id'],
+            'duedate' => ($isIndefiniteLoan == false ? date($dateFormat, strtotime($dueDate)) : null),
+            'dueTime' => ($isIndefiniteLoan == false ? $dueTime : null),
+            'loanedDate' => date($dateFormat, strtotime($loanedDate)),
             'loanedTime' => $loanedTime,
             'dueStatus' => $dueStatus,
-            'volume' => $volume,
-            'copy' => $copy,
-            'callNumber' => $callNumber,
-            'publication_year' => '',
-            'renew' => $numberOfRenewals,
-            'title' => strlen((string) $itemXml->title)
-                ? (string) $itemXml->title : "unknown title"
+            'volume' => $row['enumeration'],
+            'copy' => $row['copy_number'],
+            'callNumber' => $row['call_number_prefix'] . ' ' . $row['call_number'],
+            'publication_year' => $row['imprint'],
+            'renew' => $row['number_of_renewals'],
+            'title' => $title != '' ? $title : "unknown title",
+            'barcode' => $row['barcode'] 
         );
         $renewData = $this->checkRenewalsUpFront
             ? $this->isRenewable($patron['id'], $transactions['item_id'])
             : array('message' => 'renewable', 'renewable' => true);
 
         $transactions['renewable'] = $renewData['renewable'];
-        $transactions['message'] = $renewData['message'];
+        $transactions['message'] = $isIndefiniteLoan == false ? $renewData['message'] : null;
         
         return $transactions;
-        
     }
     
-
     /* TODO: document this */
     public function getRecord($id)
     {
@@ -1011,12 +1040,17 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     protected function getSerialReceiving($id, $holdingId, $holdingLocation) {
         /*Get serial receiving data (unbound periodicals) by holdingId*/
-        $sql = 'SELECT r.INSTANCE_ID, s.SER_RCPT_HIS_REC_ID, s.SER_RCV_REC_ID, s.RCV_REC_TYP,
+        $sql = 'SELECT r.INSTANCE_ID, SUBSTRING(r.UNBOUND_LOC,  SUBSTRING_INDEX(r.UNBOUND_LOC, \'/\', -1) + LOCATE(\'/\', REVERSE(r.UNBOUND_LOC)) + 1 )  AS unbound_shelving_loc, 
+                s.SER_RCPT_HIS_REC_ID, s.SER_RCV_REC_ID, s.RCV_REC_TYP,
                    CONCAT_WS(" ", s.ENUM_LVL_1, s.ENUM_LVL_2, s.ENUM_LVL_3, s.ENUM_LVL_4, s.ENUM_LVL_5, s.ENUM_LVL_6) AS enum,
                    if(LEFT(s.CHRON_LVL_1,1)=\'(\' || LENGTH(s.CHRON_LVL_1) = 0, 
                       s.CHRON_LVL_1, 
                       CONCAT(\'(\', CONCAT_WS(": ", s.CHRON_LVL_1, CONCAT_WS(" ", s.CHRON_LVL_2, s.CHRON_LVL_3, s.CHRON_LVL_4)), \')\')
                    ) AS chron,
+                   (SELECT loc.LOCN_NAME
+                        FROM ole_locn_t loc
+                        WHERE loc.LOCN_CD = unbound_shelving_loc
+                    ) AS unbound_loc_name,
                    s.SER_RCPT_NOTE, 
                    s.PUB_RCPT AS note
                     FROM ole_ser_rcv_his_rec s
@@ -1033,15 +1067,18 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
             $stmt->execute(array(':holdingId' => $this->holdingPrefix . $holdingId));
 
             while ($row = $stmt->fetch()) {
-                //print_r($row);
                 $item = array();
+                $unboundLocation = $row['unbound_loc_name'];
+                $unboundLocCodes = $row['unbound_loc_codes'];
 
-                    $item['id'] = $id;
-                    $item['location'] = $holdingLocation;
-                    $item['availability'] = true;
-                    $item['status'] = 'AVAILABLE';
-                    $item['unbound'] = $row['enum'] . $row['chron'];
-                    $item['note'] = $row['note'];
+                $item['id'] = $id;
+                $item['location'] = (!empty($unboundLocation) ? $unboundLocation : $holdingLocation);
+                $item['locationCodes'] = $unboundLocCodes;
+                $item['availability'] = true;
+                $item['status'] = 'AVAILABLE';
+                $item['unbound'] = $row['enum'] . $row['chron'];
+                $item['note'] = $row['note'];
+
                 if (!empty($item)) {
                     $items[] = $item;
                 }
@@ -1050,7 +1087,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         catch (Exception $e){
             /*Do nothing*/
         }
-        //print_r($items);
+
         return $items;
 
     }
@@ -1094,7 +1131,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                        (SELECT count(*)
                         FROM ole_ds_holdings_uri_t uri
                         WHERE uri.HOLDINGS_ID = h.HOLDINGS_ID
-                        ) AS uri_count
+                        ) AS uri_count,
+                       (SELECT count(*)
+                        FROM ole_ds_item_t itm
+                        WHERE itm.HOLDINGS_ID = h.HOLDINGS_ID
+                        ) AS item_count
                     FROM ole_ds_holdings_t h
                     LEFT JOIN ole_locn_t loc on loc.LOCN_CD = SUBSTRING_INDEX(h.LOCATION, \'/\',
                 -1)
@@ -1117,8 +1158,11 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 $shelvingLocation = $row['locn_name'];
                 $holdingCallNum = trim($row['call_number']);
                 $holdingCallNumDisplay = trim($row['call_number_prefix'] . ' ' . $row['call_number']);
+                $holdingNote = $row['note'];
                 $hasExtOwnership = intval($row['ext_ownership_count']) > 0;
                 $hasEholdings = intval($row['uri_count']) > 0;
+                $hasItems = intval($row['item_count']) > 0;
+                $hasHoldingNote = (!empty($holdingNote));
                 $hasUnboundItems = intval($row['ser_rcv_rec_count']) > 0;
                 $holdingId = $row['holdings_id'];
                 $locationCodes = $row['location'];
@@ -1131,12 +1175,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                     }
                 }
                 
-                /*Build a mock item for each of the holdings*/
-                if (!empty($shelvingLocation)) {
+                /*Build a mock item for each of the holdings if no items exist*/
+                if((!$hasItems or $hasHoldingNote) and (!empty($shelvingLocation))) { 
                     $item['id'] = $id; 
                     $item['location'] = $shelvingLocation; 
                     $item['callnumber'] = $holdingCallNum;
-                    $item['holdingsNotes'] = $row['note'];
+                    $item['holdingsNotes'] = $holdingNote; 
                     $item['availability'] = true;
                     $item['status'] = '';
                     $item['is_holdable'] = true;
