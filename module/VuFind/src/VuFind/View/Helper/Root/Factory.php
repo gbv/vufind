@@ -36,6 +36,8 @@ use Zend\ServiceManager\ServiceManager;
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
  * @link     http://vufind.org/wiki/vufind2:developer_manual Wiki
+ *
+ * @codeCoverageIgnore
  */
 class Factory
 {
@@ -52,6 +54,18 @@ class Factory
         return new AddThis(
             isset($config->AddThis->key) ? $config->AddThis->key : false
         );
+    }
+
+    /**
+     * Construct the AlphaBrowse helper.
+     *
+     * @param ServiceManager $sm Service manager.
+     *
+     * @return AlphaBrowse
+     */
+    public static function getAlphaBrowse(ServiceManager $sm)
+    {
+        return new AlphaBrowse($sm->get('url'));
     }
 
     /**
@@ -189,6 +203,24 @@ class Factory
     }
 
     /**
+     * Construct the Piwik helper.
+     *
+     * @param ServiceManager $sm Service manager.
+     *
+     * @return Piwik
+     */
+    public static function getPiwik(ServiceManager $sm)
+    {
+        $config = $sm->getServiceLocator()->get('VuFind\Config')->get('config');
+        $url = isset($config->Piwik->url) ? $config->Piwik->url : false;
+        $siteId = isset($config->Piwik->site_id) ? $config->Piwik->site_id : 1;
+        $customVars = isset($config->Piwik->custom_variables)
+            ? $config->Piwik->custom_variables
+            : false;
+        return new Piwik($url, $siteId, $customVars);
+    }
+
+    /**
      * Construct the GetLastSearchLink helper.
      *
      * @param ServiceManager $sm Service manager.
@@ -228,7 +260,7 @@ class Factory
     {
         $config = $sm->getServiceLocator()->get('VuFind\Config')->get('config');
         $config = isset($config->SearchHistoryLabels)
-            ? $config->SearchHistoryLabels->toArray() : array();
+            ? $config->SearchHistoryLabels->toArray() : [];
         return new HistoryLabel($config, $sm->get('transesc'));
     }
 
@@ -272,20 +304,6 @@ class Factory
     }
 
     /**
-     * Construct the ProxyUrl helper.
-     *
-     * @param ServiceManager $sm Service manager.
-     *
-     * @return ProxyUrl
-     */
-    public static function getProxyUrl(ServiceManager $sm)
-    {
-        return new ProxyUrl(
-            $sm->getServiceLocator()->get('VuFind\Config')->get('config')
-        );
-    }
-
-    /**
      * Construct the OpenUrl helper.
      *
      * @param ServiceManager $sm Service manager.
@@ -297,6 +315,20 @@ class Factory
         $config = $sm->getServiceLocator()->get('VuFind\Config')->get('config');
         return new OpenUrl(
             $sm->get('context'), isset($config->OpenURL) ? $config->OpenURL : null
+        );
+    }
+
+    /**
+     * Construct the ProxyUrl helper.
+     *
+     * @param ServiceManager $sm Service manager.
+     *
+     * @return ProxyUrl
+     */
+    public static function getProxyUrl(ServiceManager $sm)
+    {
+        return new ProxyUrl(
+            $sm->getServiceLocator()->get('VuFind\Config')->get('config')
         );
     }
 
@@ -356,6 +388,21 @@ class Factory
     }
 
     /**
+     * Construct the SafeMoneyFormat helper.
+     *
+     * @param ServiceManager $sm Service manager.
+     *
+     * @return SafeMoneyFormat
+     */
+    public static function getSafeMoneyFormat(ServiceManager $sm)
+    {
+        $config = $sm->getServiceLocator()->get('VuFind\Config')->get('config');
+        $defaultCurrency = isset($config->Site->defaultCurrency)
+            ? $config->Site->defaultCurrency : null;
+        return new SafeMoneyFormat($defaultCurrency);
+    }
+
+    /**
      * Construct the SearchBox helper.
      *
      * @param ServiceManager $sm Service manager.
@@ -410,7 +457,7 @@ class Factory
     {
         $config = $sm->getServiceLocator()->get('VuFind\Config')->get('config');
         $config = isset($config->SearchTabs)
-            ? $config->SearchTabs->toArray() : array();
+            ? $config->SearchTabs->toArray() : [];
         return new SearchTabs(
             $sm->getServiceLocator()->get('VuFind\SearchResultsPluginManager'),
             $config, $sm->get('url')
@@ -462,7 +509,7 @@ class Factory
         if (!$setting) {
             $setting = 'disabled';
         }
-        $whitelist = array('enabled', 'disabled', 'public_only', 'private_only');
+        $whitelist = ['enabled', 'disabled', 'public_only', 'private_only'];
         if (!in_array($setting, $whitelist)) {
             $setting = 'enabled';
         }
@@ -483,18 +530,5 @@ class Factory
             || ($cfg->Social->tags && $cfg->Social->tags !== 'disabled')
             ? 'enabled' : 'disabled';
         return new UserTags($mode);
-    }
-
-    /**
-     * Construct the WorldCat helper.
-     *
-     * @param ServiceManager $sm Service manager.
-     *
-     * @return WorldCat
-     */
-    public static function getWorldCat(ServiceManager $sm)
-    {
-        $bm = $sm->getServiceLocator()->get('VuFind\Search\BackendManager');
-        return new WorldCat($bm->get('WorldCat')->getConnector());
     }
 }

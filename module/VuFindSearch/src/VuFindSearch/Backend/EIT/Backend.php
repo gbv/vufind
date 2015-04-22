@@ -26,7 +26,6 @@
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
  * @link     http://vufind.org
  */
-
 namespace VuFindSearch\Backend\EIT;
 
 use VuFindSearch\Query\AbstractQuery;
@@ -91,6 +90,9 @@ class Backend extends AbstractBackend
     public function search(AbstractQuery $query, $offset, $limit,
         ParamBag $params = null
     ) {
+        if (null === $params) {
+            $params = new ParamBag();
+        }
         $params->mergeWith($this->getQueryBuilder()->build($query));
         $response   = $this->connector->search($params, $offset, $limit);
         $this->log('debug', print_r($response, true));

@@ -26,14 +26,11 @@
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
  * @link     http://vufind.org
  */
-
 namespace VuFindTest\Backend\Primo;
 
 use VuFindSearch\Backend\Primo\Backend;
-use VuFindSearch\Backend\Primo\Response\RecordCollectionFactory;
 use VuFindSearch\ParamBag;
 use VuFindSearch\Query\Query;
-use PHPUnit_Framework_TestCase;
 use InvalidArgumentException;
 
 /**
@@ -54,7 +51,7 @@ class BackendTest extends \VuFindTest\Unit\TestCase
      */
     public function testRetrieve()
     {
-        $conn = $this->getConnectorMock(array('getRecord'));
+        $conn = $this->getConnectorMock(['getRecord']);
         $conn->expects($this->once())
             ->method('getRecord')
             ->will($this->returnValue($this->loadResponse('retrieve')));
@@ -77,7 +74,7 @@ class BackendTest extends \VuFindTest\Unit\TestCase
      */
     public function testSearch()
     {
-        $conn = $this->getConnectorMock(array('query'));
+        $conn = $this->getConnectorMock(['query']);
         $conn->expects($this->once())
             ->method('query')
             ->will($this->returnValue($this->loadResponse('search')));
@@ -131,6 +128,58 @@ class BackendTest extends \VuFindTest\Unit\TestCase
         $this->assertEquals($conn, $back->getConnector());
     }
 
+    /**
+     * Test search exception handling.
+     *
+     * @return void
+     *
+     * @expectedException VuFindSearch\Backend\Exception\BackendException
+     */
+    public function testSearchWrapsPrimoException()
+    {
+        $conn = $this->getConnectorMock(['query']);
+        $conn->expects($this->once())
+            ->method('query')
+            ->will($this->throwException(new \Exception()));
+        $back = new Backend($conn);
+        $back->search(new Query(), 1, 1);
+    }
+
+    /**
+     * Test retrieve exception handling.
+     *
+     * @return void
+     *
+     * @expectedException VuFindSearch\Backend\Exception\BackendException
+     */
+    public function testRetrieveWrapsPrimoException()
+    {
+        $conn = $this->getConnectorMock(['getRecord']);
+        $conn->expects($this->once())
+            ->method('getRecord')
+            ->will($this->throwException(new \Exception()));
+        $back = new Backend($conn);
+        $back->retrieve('1234');
+    }
+
+    /**
+     * Test merged param bag.
+     *
+     * @return void
+     */
+    public function testMergedParamBag()
+    {
+        $myParams = new ParamBag(['foo' => 'bar']);
+        $expectedParams = ['foo' => 'bar', 'limit' => 10, 'pageNumber' => 1.0, 'query' => [['index' => null, 'lookfor' => 'baz']]];
+        $conn = $this->getConnectorMock(['query']);
+        $conn->expects($this->once())
+            ->method('query')
+            ->with($this->equalTo('inst-id'), $this->equalTo($expectedParams['query']), $this->equalTo($expectedParams))
+            ->will($this->returnValue(['recordCount' => 0, 'documents' => []]));
+        $back = new Backend($conn);
+        $back->search(new Query('baz'), 0, 10, $myParams);
+    }
+
     /// Internal API
 
     /**
@@ -158,12 +207,12 @@ class BackendTest extends \VuFindTest\Unit\TestCase
      *
      * @return array
      */
-    protected function getConnectorMock(array $mock = array())
+    protected function getConnectorMock(array $mock = [])
     {
         $client = $this->getMock('Zend\Http\Client');
         return $this->getMock(
             'VuFindSearch\Backend\Primo\Connector', $mock,
-            array('api-id', 'inst-id', $client)
+            ['api-id', 'inst-id', $client]
         );
     }
 }

@@ -36,7 +36,6 @@ namespace VuFind\Controller;
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
  * @link     http://vufind.org   Main Site
  */
-
 class PrimorecordController extends AbstractRecord
 {
     /**
@@ -59,7 +58,7 @@ class PrimorecordController extends AbstractRecord
      */
     protected function resultScrollerActive()
     {
-        $config = $this->getServiceLocator()->get('VuFind\Config')->get('Summon');
+        $config = $this->getServiceLocator()->get('VuFind\Config')->get('Primo');
         return (isset($config->Record->next_prev_navigation)
             && $config->Record->next_prev_navigation);
     }
