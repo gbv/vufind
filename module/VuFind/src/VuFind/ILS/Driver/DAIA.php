@@ -356,7 +356,7 @@ class DAIA extends AbstractBase implements
                     foreach ($document["item"] as $item) {
                         $result_item = [];
                         $result_item["id"] = $id;
-                        $result_item["item_id"] = $item["$id"];
+                        $result_item["item_id"] = $item["id"];
                         $number++; // count items
                         $result_item["number"] = $number;
                         // set default value for barcode
