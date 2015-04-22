@@ -207,7 +207,7 @@ class PAIA extends DAIA
                     $renew_details = $loans_response['doc'][$i]['item'];
                 } */
                 // get PPN from PICA catalog since it is not part of PAIA
-                $ppn = $this->_getPpnByBarcode($loans_response['doc'][$i]['label']);
+                $ppn = $this->_getPpnByBarcode($loans_response['doc'][$i]['item']);
                 if ($loans_response['doc'][$i]['status'] == '4') {
                     $message = "hold_available";
                 }
@@ -348,7 +348,7 @@ class PAIA extends DAIA
 
         $fineList = array();
         foreach ($fees_response['fee'] as $fine) {
-            $ppn = $this->_getPpnByBarcode(substr($fine['item'], -8));
+            $ppn = $this->_getPpnByBarcode($fine['item']);
             $fineList[] = array(
                 "id"       => $ppn,
                 "amount"   => $fine['amount'],
@@ -389,7 +389,7 @@ class PAIA extends DAIA
             // this is not yet supported by PAIA
             if ($loans_response['doc'][$i]['status'] == '1' || $loans_response['doc'][$i]['status'] == '2') {
                 // get PPN from PICA catalog since it is not part of PAIA
-                $ppn = $this->_getPpnByBarcode($loans_response['doc'][$i]['label']);
+                $ppn = $this->_getPpnByBarcode($loans_response['doc'][$i]['item']);
                 $cancel_details = false;
                 if ($loans_response['doc'][$i]['cancancel'] == 1) {
                     $cancel_details = $loans_response['doc'][$i]['item'];
@@ -608,8 +608,13 @@ class PAIA extends DAIA
     private function _getPpnByBarcode($barcode)
     {
         $barcode = str_replace("/"," ",$barcode);
+        if (preg_match("/bar:(.*)$/", $barcode, $match)) {
+            $barcode = $match[1];
+        } else {
+            return false;
+        }
         $searchUrl = $this->catalogURL .
-            "XML=1.0/CMD?ACT=SRCHA&IKT=1016&SRT=YOP&TRM=sgn+$barcode";
+            "XML=1.0/CMD?ACT=SRCHA&IKT=1016&SRT=YOP&TRM=bar+$barcode";
 
         $doc = new DomDocument();
         $doc->load($searchUrl);
