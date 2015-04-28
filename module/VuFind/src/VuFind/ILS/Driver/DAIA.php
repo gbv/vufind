@@ -89,6 +89,26 @@ class DAIA extends AbstractBase implements
     protected $legacySupport = false;
 
     /**
+     * acceptable ContentTypes delivered by DAIA server
+     * in HTTP header
+     *
+     * @var array
+     */
+    protected $contentTypesResponse;
+
+    /**
+     * ContentTypes to use in PAIA HTTP requests
+     * in HTTP header
+     *
+     * @var array
+     */   
+    protected $contentTypesRequest = [
+            "xml"  => "application/xml",
+            "json" => "application/json",
+        ];
+
+
+    /**
      * Initialize the driver.
      *
      * Validate configuration and perform all resource-intensive tasks needed to
@@ -129,6 +149,12 @@ class DAIA extends AbstractBase implements
             $this->multiQuery = $this->config['DAIA']['multiQuery'];
         } else {
             $this->debug("No multiQuery setting found, using default: false");
+        }
+
+        if (isset($this->config['DAIA']['daiaContentTypes'])) {
+            $this->contentTypesResponse = $this->config['DAIA']['daiaContentTypes'];
+        } else {
+            $this->debug("No acceptable replay ContentTypes defined. Accepting any.");
         }
     }
 
@@ -298,14 +324,10 @@ class DAIA extends AbstractBase implements
      */
     protected function doHTTPRequest($id)
     {
-        $contentTypes = [
-            "xml"  => "application/xml",
-            "json" => "application/json",
-        ];
 
         $http_headers = [
-            "Content-type: " . $contentTypes[$this->daiaResponseFormat],
-            "Accept: " .  $contentTypes[$this->daiaResponseFormat],
+            "Content-type: " . $this->contentTypesRequest[$this->daiaResponseFormat],
+            "Accept: " .  $this->contentTypesRequest[$this->daiaResponseFormat],
         ];
 
         $params = [
@@ -346,19 +368,19 @@ class DAIA extends AbstractBase implements
         }
 
         // check if result matches daiaResponseFormat
-        if (!preg_match(
-            "/^" .
-            str_replace("/", "\/", $contentTypes[$this->daiaResponseFormat]) .
-            "(\s*)(\;.*)?/",
-            strtolower($result->getHeaders()->get("ContentType")->getFieldValue())
-        )) {
-            throw new ILSException(
-                "DAIA-ResponseFormat not supported. Received: " .
-                $result->getHeaders()->get("ContentType")->getFieldValue() . " - " .
-                "Expected: " . $contentTypes[$this->daiaResponseFormat]
-            );
+        if ($this->contentTypesResponse != null) {
+            if ($this->contentTypesResponse[$this->daiaResponseFormat]) {
+                $contentTypesResponse = array_map('trim',split(",", $this->contentTypesResponse[$this->daiaResponseFormat]));
+                list($responseMediaType, $responseEncoding) = split(";", $result->getHeaders()->get("ContentType")->getFieldValue());
+                if (!in_array(trim($responseMediaType), $contentTypesResponse)) {
+                    throw new ILSException(
+                       "DAIA-ResponseFormat not supported. Received: " .
+                       $responseMediaType . " - " .
+                       "Expected: " . $this->contentTypesResponse[$this->daiaResponseFormat]
+                    );
+                }
+            }
         }
-
         return ($result->getBody());
     }
 
