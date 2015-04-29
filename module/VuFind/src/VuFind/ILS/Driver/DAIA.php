@@ -372,8 +372,7 @@ class DAIA extends AbstractBase implements
             if ($this->contentTypesResponse[$this->daiaResponseFormat]) {
                 $contentTypesResponse = array_map('trim', explode(',', $this->contentTypesResponse[$this->daiaResponseFormat]));
                 list($responseMediaType) = array_map('trim', explode(";", $result->getHeaders()->get("ContentType")->getFieldValue()));
-    if (!in_array($responseMediaType, $contentTypesResponse))
-                if (!in_array(trim($responseMediaType), $contentTypesResponse)) {
+                if (!in_array($responseMediaType, $contentTypesResponse)) {
                     throw new ILSException(
                        "DAIA-ResponseFormat not supported. Received: " .
                        $responseMediaType . " - " .
