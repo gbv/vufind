@@ -212,7 +212,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 );
             } else {
                 $this->db = new PDO(
-                    "mysql:host=" . $this->config['Catalog']['host'] . ";port=" . $this->config['Catalog']['port'] . ";dbname=" . $this->config['Catalog']['database'],
+                    "mysql:host=" . $this->config['Catalog']['host'] . ";port=" . $this->config['Catalog']['port'] . ";dbname=" . $this->config['Catalog']['database']. ";charset=UTF8",
                     $this->config['Catalog']['user'],
                     $this->config['Catalog']['password']
                 );
@@ -347,31 +347,31 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $patron['group'] = '';
         
         if (!empty($xml->patronName->firstName)) {
-            $patron['firstname'] = utf8_encode($xml->patronName->firstName);
+            $patron['firstname'] = $xml->patronName->firstName;
         }
         if (!empty($xml->patronName->lastName)) {
-            $patron['lastname'] = utf8_encode($xml->patronName->lastName);
+            $patron['lastname'] = $xml->patronName->lastName;
         }
         if (!empty($xml->patronEmail->emailAddress)) {
-            $patron['email'] = utf8_encode($xml->patronEmail->emailAddress);
+            $patron['email'] = $xml->patronEmail->emailAddress;
         }
         if (!empty($xml->patronAddress->line1)) {
-            $patron['address1'] = utf8_encode($xml->patronAddress->line1);
+            $patron['address1'] = $xml->patronAddress->line1;
         }
         if (!empty($xml->patronAddress->line2)) {
-            $patron['address2'] = utf8_encode($xml->patronAddress->line2);
+            $patron['address2'] = $xml->patronAddress->line2;
         }
         if (!empty($xml->patronAddress->city)) {
-            $patron['city'] = utf8_encode($xml->patronAddress->city);
+            $patron['city'] = $xml->patronAddress->city;
         }
         if (!empty($xml->patronAddress->stateProvinceCode)) {
-            $patron['state'] = utf8_encode($xml->patronAddress->stateProvinceCode);
+            $patron['state'] = $xml->patronAddress->stateProvinceCode;
         }
         if (!empty($xml->patronAddress->postalCode)) {
-            $patron['zip'] = utf8_encode($xml->patronAddress->postalCode);
+            $patron['zip'] = $xml->patronAddress->postalCode;
         }
         if (!empty($xml->patronPhone->phoneNumber)) {
-            $patron['phone'] = utf8_encode($xml->patronPhone->phoneNumber);
+            $patron['phone'] = $xml->patronPhone->phoneNumber;
         }
 
         return (empty($patron) ? null : $patron);
@@ -390,7 +390,58 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * @throws ILSException
      * @return array        Array of the patron's transactions on success.
      */
-    public function getMyTransactions($patron){
+    public function getMyTransactions($patron) {
+        $holdList = array();
+        
+        $uri = $this->circService . '?service=getCheckedOutItems&patronBarcode=' . $patron['barcode'] . '&operatorId=' . $this->operatorId;
+        
+        $request = new Request();
+        $request->setMethod(Request::METHOD_GET);
+        $request->setUri($uri);
+
+        $client = new Client();
+        $client->setOptions(array('timeout' => 30));
+            
+        try {
+            $response = $client->dispatch($request);
+        } catch (Exception $e) { 
+            throw new ILSException($e->getMessage());
+        }
+        // TODO: reimplement something like this when the API starts returning the proper http status code
+        /*
+        if (!$response->isSuccess()) {
+            throw HttpErrorException::createFromResponse($response);
+        }
+        */
+        $content = $response->getBody();
+
+        $xml = simplexml_load_string($content);
+
+        $code = $xml->xpath('//code');
+        $code = (string)$code[0][0];
+        
+        //var_dump($code);
+        //var_dump($xml);
+
+        if ($code == '000') {
+            $holdItems = $xml->xpath('//checkOutItem');
+            $holdsList = array();
+            
+            foreach($holdItems as $item) {
+                //var_dump($item);
+                $processRow = $this->processMyTransactions($item, $patron);
+                //var_dump($processRow);
+                $holdsList[] = $processRow;
+            }
+        }
+
+        return $holdsList;
+
+
+    }
+
+    public function getMyTransactionsOld($patron){
+
         /*Return array*/
         $transList = array();
         $sql = 'SELECT p.id AS patron_id, p.first_name AS first_name, p.last_name AS last_name, p.library_id AS library_id,
@@ -636,6 +687,26 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
     }
 
+    protected function processMyTransactions($itemXml, $patron = false)
+    {
+        $availableDateTime = (string) $itemXml->availableDate;
+        $available = ($availableDateTime <= date('Y-m-d')) ? true:false;
+        // JEJ CHANGE
+		// Did the API change to return a string instead of date? (DL)
+        $available = ((string) $itemXml->availableStatus == 'ONHOLD') ?  true:false;
+
+        return array(
+            'duedate' => (string) $itemXml->dueDate,
+            'id' => substr((string) $itemXml->catalogueId, strpos((string) $itemXml->catalogueId, '-')+1),
+            'item_id' => (string) $itemXml->itemId,
+            'create' => (string) $itemXml->createDate,
+            'title' => strlen((string) $itemXml->title)
+                ? (string) $itemXml->title : "unknown title",
+            'renewable' => array('message' => 'renewable', 'renewable' => true)
+        );
+
+    }
+
     /**
      * Protected support method for getMyTransactions.
      *
@@ -724,6 +795,8 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      */
     public function getStatus($id)
     {
+
+        $idole = intval(substr($id, 0, -1));
         $sql = 'SELECT DISTINCT loc.LOCN_NAME AS locn_name, 
                     h.LOCATION AS holdings_locn_code, h.call_number_prefix AS holding_call_number_prefix, h.call_number AS holding_call_number, 
                     i.LOCATION AS item_locn_code, i.call_number_prefix AS item_call_number_prefix, i.call_number AS item_call_number, i.COPY_NUMBER AS item_copy_number,
@@ -739,7 +812,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         try {
             /*Query the database*/
             $stmt = $this->db->prepare($sql);
-            $stmt->execute(array(':id' => $id));
+            $stmt->execute(array(':id' => $idole));
  
             /*Build the return array*/
             $items = array();
@@ -886,7 +959,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
                 $items[] = $item;
             }
         }
-        catch (Exception $e){
+        catch (Exception $e){print_r($e);
             /*Do nothing*/
         }
         /*Sort numerically by copy/volume number.*/
@@ -1108,8 +1181,10 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
      * keys: id, availability (boolean), status, location, reserve, callnumber,
      * duedate, number, barcode.
      */
-    public function getHolding($id, $patron = false)
+    public function getHolding($id, array $patron = NULL)
     {
+        $idole = intval(substr($id, 0, -1));
+
         /*Get holdings by bib id, with holdings notes.*/
         $sql = 'SELECT h.HOLDINGS_ID AS holdings_id, h.BIB_ID AS bib_id, h.location AS
                 location, loc.LOCN_NAME AS locn_name, 
@@ -1145,7 +1220,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         try {
             /*Query the database*/
             $stmt = $this->db->prepare($sql);
-            $stmt->execute(array(':id' => $id));
+            $stmt->execute(array(':id' => $idole));
 
             /*Final return array*/
             $items = array();
@@ -1249,7 +1324,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         //Copy Request              //Copy Request
         //In Transit Request        //In Transit Request
         //ASR Request               //ASR Request
-        
+      
         $patron = $holdDetails['patron'];
         $patronId = $patron['id'];
         $service = 'placeRequest';
@@ -1259,7 +1334,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         $patronBarcode = $patron['barcode'];
         
         $uri = $this->circService . "?service={$service}&patronBarcode={$patronBarcode}&operatorId={$this->operatorId}&itemBarcode={$itemBarcode}&requestType={$requestType}";
-        //var_dump($uri);
+        var_dump($uri);
         
         $request = new Request();
         $request->setMethod(Request::METHOD_POST);
@@ -1267,13 +1342,12 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
         $client = new Client();
         $client->setOptions(array('timeout' => 30));
-
         try {
             $response = $client->dispatch($request);
-        } catch (Exception $e) { 
+        } catch (Exception $e) {
             throw new ILSException($e->getMessage());
         }
-        
+
         // TODO: reimplement something like this when the API starts returning the proper http status code
         /*
         if (!$response->isSuccess()) {
@@ -1284,7 +1358,7 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
         /* TODO: this will always be 201 */
         //$statusCode = $response->getStatusCode();
         $content = $response->getBody();
-        
+
         $xml = simplexml_load_string($content);
         $msg = $xml->xpath('//message');
         $code = $xml->xpath('//code');
