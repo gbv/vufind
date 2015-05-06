@@ -440,57 +440,6 @@ class OLE extends AbstractBase implements \VuFindHttp\HttpServiceAwareInterface
 
     }
 
-    public function getMyTransactionsOld($patron){
-
-        /*Return array*/
-        $transList = array();
-        $sql = 'SELECT p.id AS patron_id, p.first_name AS first_name, p.last_name AS last_name, p.library_id AS library_id,
-                    p.user_name AS user_name, p.email_address AS email_address,
-                    l.ITM_ID AS item_id, i.HOLDINGS_ID AS holdings_id, h.BIB_ID AS bib_num, i.CURRENT_BORROWER AS borrower,
-                    i.DUE_DATE_TIME AS duedate, l.CRTE_DT_TIME AS loaned_date, i.ITEM_STATUS_ID AS item_status_id,
-                    l.NUM_OVERDUE_NOTICES_SENT AS overdue_notices_count, i.COPY_NUMBER AS copy_number, i.ENUMERATION AS enumeration,
-                    i.CHRONOLOGY AS chronology, h.CALL_NUMBER_PREFIX AS call_number_prefix, h.CALL_NUMBER AS call_number, 
-                    h.IMPRINT AS imprint, bib.CONTENT AS bib_data, i.BARCODE AS barcode,
-                    l.NUM_RENEWALS AS number_of_renewals
-                FROM uc_people p
-                JOIN ole_dlvr_loan_t l ON p.id = l.OLE_PTRN_ID
-                JOIN ole_ds_item_t i ON i.BARCODE = l.ITM_ID
-                JOIN ole_ds_holdings_t h ON i.HOLDINGS_ID = h.HOLDINGS_ID
-                JOIN ole_ds_bib_t bib ON bib.BIB_ID = h.BIB_ID
-                    WHERE p.library_id = :barcode 
-                        AND i.CURRENT_BORROWER = p.id';
-        try {
-            /*Query the database*/
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute(array(':barcode' => $patron['barcode']));
-            
-            while ($row = $stmt->fetch()) {
-                $processRow = $this->processMyTransactionsData($row, $patron);
-                $transList[] = $processRow;
-            }
-        }
-        catch (Exception $e){
-            /*Do nothing*/
-        }
-
-        /*Set the default sort order for checked out items.*/
-        switch ($this->coiSort) {
-            case 'dueDate':
-                /*By duedate*/
-                uasort($transList, function($a, $b) { return OLE::cmp(OLE::sortDate($a['duedate']), OLE::sortDate($b['duedate'])); });
-                break;
-            case 'loanedDate' :
-                /*By date checked out*/
-                uasort($transList, function($a, $b) { return OLE::cmp(OLE::sortDate($a['loanedDate']), OLE::sortDate($b['loanedDate'])); });
-                break;
-            default:
-                /*Alphabetical*/
-                usort($transList, function($a, $b){ return strcasecmp(preg_replace('/[^ \w]+/', '', $a['title']), preg_replace('/[^ \w]+/', '', $b['title'])); });
-        }
-        
-        return $transList;
-    }
-
     /**
      * Converts a date into a sortable date.
      *
