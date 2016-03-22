@@ -84,4 +84,18 @@ class SolrVZGRecord extends VuFindSolrMarc
             $this->fields['title_sub'][0] : '';
     }
 
+     /**
+      * make getPrimaryAuthors() return an array
+      * even if author is defined as "single valued" in Solr
+      *
+      * @return array
+      */
+     public function getPrimaryAuthors()
+     {
+         return is_array($this->fields['author']) ?
+             $this->fields['author'] : isset($this->fields['author']) ?
+             array($this->fields['author']) : [];
+     }
+
+
 }
