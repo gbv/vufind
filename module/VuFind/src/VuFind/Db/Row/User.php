@@ -19,11 +19,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Db_Row
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 namespace VuFind\Db\Row;
 use Zend\Db\Sql\Expression,
@@ -36,11 +36,11 @@ use Zend\Db\Sql\Expression,
 /**
  * Row Definition for user
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Db_Row
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
     \ZfcRbac\Identity\IdentityInterface
@@ -223,8 +223,9 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
      *
      * @return \Zend\Db\ResultSet\AbstractResultSet
      */
-    public function getTags($resourceId = null, $listId = null, $source = 'VuFind')
-    {
+    public function getTags($resourceId = null, $listId = null,
+        $source = DEFAULT_SEARCH_BACKEND
+    ) {
         $userId = $this->id;
         $callback = function ($select) use ($userId, $resourceId, $listId, $source) {
             $select->columns(
@@ -285,7 +286,7 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
      * @return string
      */
     public function getTagString($resourceId = null, $listId = null,
-        $source = 'VuFind'
+        $source = DEFAULT_SEARCH_BACKEND
     ) {
         $myTagList = $this->getTags($resourceId, $listId, $source);
         $tagStr = '';
@@ -347,8 +348,9 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
      *
      * @return array
      */
-    public function getSavedData($resourceId, $listId = null, $source = 'VuFind')
-    {
+    public function getSavedData($resourceId, $listId = null,
+        $source = DEFAULT_SEARCH_BACKEND
+    ) {
         $table = $this->getDbTable('UserResource');
         return $table->getSavedData($resourceId, $source, $listId, $this->id);
     }
@@ -395,7 +397,7 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
      *
      * @return void
      */
-    public function removeResourcesById($ids, $source = 'VuFind')
+    public function removeResourcesById($ids, $source = DEFAULT_SEARCH_BACKEND)
     {
         // Retrieve a list of resource IDs:
         $resourceTable = $this->getDbTable('Resource');
@@ -415,7 +417,7 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
     /**
      * Whether library cards are enabled
      *
-     * @return boolean
+     * @return bool
      */
     public function libraryCardsEnabled()
     {
@@ -543,12 +545,14 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
      * @param string $cardName Card name
      * @param string $username Username
      * @param string $password Password
+     * @param string $homeLib  Home Library
      *
      * @return int Card ID
      * @throws \VuFind\Exception\LibraryCard
      */
-    public function saveLibraryCard($id, $cardName, $username, $password)
-    {
+    public function saveLibraryCard($id, $cardName, $username,
+        $password, $homeLib = ''
+    ) {
         if (!$this->libraryCardsEnabled()) {
             throw new \VuFind\Exception\LibraryCard('Library Cards Disabled');
         }
@@ -576,6 +580,9 @@ class User extends RowGateway implements \VuFind\Db\Table\DbTableAwareInterface,
         }
         $row->card_name = $cardName;
         $row->cat_username = $username;
+        if (!empty($homeLib)) {
+            $row->home_library = $homeLib;
+        }
         if ($this->passwordEncryptionEnabled()) {
             $row->cat_password = null;
             $row->cat_pass_enc = $this->encryptOrDecrypt($password, true);

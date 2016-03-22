@@ -24,7 +24,7 @@
  * @package  Service
  * @author   David Maus <maus@hab.de>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     https://github.com/dmj/vf2-search-subsystem
+ * @link     https://vufind.org/wiki/development
  */
 namespace VuFindSearch\Response;
 
@@ -35,11 +35,10 @@ namespace VuFindSearch\Response;
  * @package  Service
  * @author   David Maus <maus@hab.de>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     https://github.com/dmj/vf2-search-subsystem
+ * @link     https://vufind.org/wiki/development
  */
 interface RecordCollectionInterface extends \Countable, \Iterator
 {
-
     /**
      * Return total number of records found.
      *

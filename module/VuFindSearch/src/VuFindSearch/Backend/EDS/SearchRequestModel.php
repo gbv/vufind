@@ -23,7 +23,7 @@
  * @package  EBSCO
  * @author   Michelle Milton <mmilton@epnet.com>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org
+ * @link     https://vufind.org
  */
 namespace VuFindSearch\Backend\EDS;
 /**
@@ -33,7 +33,7 @@ namespace VuFindSearch\Backend\EDS;
  * @package  EBSCO
  * @author   Michelle Milton <mmilton@epnet.com>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org
+ * @link     https://vufind.org
  */
 class SearchRequestModel
 {
@@ -146,7 +146,7 @@ class SearchRequestModel
     {
         // PublicationDate:[xxxx TO xxxx]
         $dates = substr($filter, 17);
-        $dates = substr($dates, 0, strlen($dates)-1);
+        $dates = substr($dates, 0, strlen($dates) - 1);
         $parts = explode(' TO ', $dates, 2);
         if (count($parts) == 2) {
             $start = trim($parts[0]);

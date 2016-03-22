@@ -19,12 +19,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Matt Mackey <vufind-tech@lists.sourceforge.net>
  * @author   Ray Cummins <vufind-tech@lists.sourceforge.net>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 namespace VuFind\ILS\Driver;
 use VuFind\Exception\ILS as ILSException;
@@ -32,12 +32,12 @@ use VuFind\Exception\ILS as ILSException;
 /**
  * Horizon ILS Driver
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Matt Mackey <vufind-tech@lists.sourceforge.net>
  * @author   Ray Cummins <vufind-tech@lists.sourceforge.net>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 class Horizon extends AbstractBase
 {
@@ -276,7 +276,6 @@ class Horizon extends AbstractBase
     {
         $duedate     = $row['DUEDATE'];
         $item_status = $row['STATUS_CODE']; //get the item status code
-
 
         $statusValues = $this->parseStatus($item_status);
 
@@ -909,7 +908,7 @@ class Horizon extends AbstractBase
             if (is_numeric($dueTimeStamp)) {
                 if ($now > $dueTimeStamp) {
                     $dueStatus = "overdue";
-                } else if ($now > $dueTimeStamp-(1*24*60*60)) {
+                } else if ($now > $dueTimeStamp - (1 * 24 * 60 * 60)) {
                     $dueStatus = "due";
                 }
             }

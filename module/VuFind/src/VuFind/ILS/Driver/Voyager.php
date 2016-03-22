@@ -20,13 +20,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Andrew S. Nagy <vufind-tech@lists.sourceforge.net>
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @author   Ere Maijala <ere.maijala@helsinki.fi>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 namespace VuFind\ILS\Driver;
 use File_MARC, PDO, PDOException,
@@ -38,13 +38,13 @@ use File_MARC, PDO, PDOException,
 /**
  * Voyager ILS Driver
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Andrew S. Nagy <vufind-tech@lists.sourceforge.net>
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @author   Ere Maijala <ere.maijala@helsinki.fi>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 class Voyager extends AbstractBase
     implements TranslatorAwareInterface, \Zend\Log\LoggerAwareInterface
@@ -495,6 +495,9 @@ class Voyager extends AbstractBase
                     = $this->pickStatus($availability['otherStatuses']);
             }
             $current['availability'] = $availability['available'];
+            $current['use_unknown_message']
+                = in_array('No information available', $current['status_array']);
+
             $status[] = $current;
         }
 
@@ -797,7 +800,7 @@ class Voyager extends AbstractBase
         $raw = $processed = [];
         // Collect raw data:
         while ($row = $sqlStmt->fetch(PDO::FETCH_ASSOC)) {
-            $raw[] = $row['MFHD_ID'] . '||' . $row['ENUMCHRON'];
+            $raw[] = $row['MFHD_ID'] . '||' . utf8_encode($row['ENUMCHRON']);
         }
         // Deduplicate data and format it:
         foreach (array_unique($raw) as $current) {
@@ -1157,6 +1160,19 @@ class Voyager extends AbstractBase
     }
 
     /**
+     * Sanitize patron PIN code (remove characters Voyager doesn't handle properly)
+     *
+     * @param string $pin PIN code to sanitize
+     *
+     * @return string Sanitized PIN code
+     */
+    protected function sanitizePIN($pin)
+    {
+        $pin = preg_replace('/[^0-9a-zA-Z#&<>+^`~]+/', '', $pin);
+        return $pin;
+    }
+
+    /**
      * Patron Login
      *
      * This is responsible for authenticating a patron against the catalog.
@@ -1216,7 +1232,8 @@ class Voyager extends AbstractBase
                     ? mb_strtolower(utf8_encode($row['FALLBACK_LOGIN']), 'UTF-8')
                     : null;
 
-                if ((!is_null($primary) && $primary == $compareLogin)
+                if ((!is_null($primary) && ($primary == $compareLogin
+                    || $primary == $this->sanitizePIN($compareLogin)))
                     || ($fallback_login_field && is_null($primary)
                     && $fallback == $compareLogin)
                 ) {
@@ -1364,7 +1381,7 @@ class Voyager extends AbstractBase
             if (is_numeric($dueTimeStamp)) {
                 if ($now > $dueTimeStamp) {
                     $dueStatus = "overdue";
-                } else if ($now > $dueTimeStamp-(1*24*60*60)) {
+                } else if ($now > $dueTimeStamp - (1 * 24 * 60 * 60)) {
                     $dueStatus = "due";
                 }
             }
@@ -1596,7 +1613,8 @@ class Voyager extends AbstractBase
             "(HOLD_RECALL_ITEMS.HOLD_RECALL_STATUS IS NULL OR " .
             "HOLD_RECALL_ITEMS.HOLD_RECALL_STATUS < 3)",
             "BIB_TEXT.BIB_ID = HOLD_RECALL.BIB_ID",
-            "(HOLD_RECALL.HOLDING_DB_ID IS NULL OR (HOLD_RECALL.HOLDING_DB_ID = " .
+            "(HOLD_RECALL.HOLDING_DB_ID IS NULL OR HOLD_RECALL.HOLDING_DB_ID = 0 " .
+            "OR (HOLD_RECALL.HOLDING_DB_ID = " .
             "VOYAGER_DATABASES.DB_ID AND VOYAGER_DATABASES.DB_CODE = 'LOCAL'))",
             "HOLD_RECALL.REQUEST_GROUP_ID = REQUEST_GROUP.GROUP_ID(+)"
         ];
@@ -1870,7 +1888,7 @@ class Voyager extends AbstractBase
         $sql = $this->buildSqlFromArray($sqlArray);
         try {
             $sqlStmt = $this->db->prepare($sql['string']);
-            $this->debugsql(__FUNCTION__, $sql['string'], $sql['bind']);
+            $this->debugSQL(__FUNCTION__, $sql['string'], $sql['bind']);
             $sqlStmt->execute($sql['bind']);
             while ($sqlRow = $sqlStmt->fetch(PDO::FETCH_ASSOC)) {
                 $list[] = $this->processMyStorageRetrievalRequestsData($sqlRow);
@@ -2026,8 +2044,8 @@ class Voyager extends AbstractBase
 
         $page = ($page) ? $page : 1;
         $limit = ($limit) ? $limit : 20;
-        $bindParams[':startRow'] = (($page-1)*$limit)+1;
-        $bindParams[':endRow'] = ($page*$limit);
+        $bindParams[':startRow'] = (($page - 1) * $limit) + 1;
+        $bindParams[':endRow'] = ($page * $limit);
         /*
         $sql = "select * from " .
                "(select a.*, rownum rnum from " .

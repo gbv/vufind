@@ -19,11 +19,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Controller_Plugins
  * @author   Chris Hallberg <crhallberg@gmail.com>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://www.vufind.org  Main Page
+ * @link     https://vufind.org Main Page
  */
 namespace VuFind\Controller\Plugin;
 use Zend\Mvc\Controller\Plugin\AbstractPlugin;
@@ -31,11 +31,11 @@ use Zend\Mvc\Controller\Plugin\AbstractPlugin;
 /**
  * Zend action helper to manage Recaptcha fields
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Controller_Plugins
  * @author   Chris Hallberg <crhallberg@gmail.com>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://www.vufind.org  Main Page
+ * @link     https://vufind.org Main Page
  */
 class Recaptcha extends AbstractPlugin
 {
@@ -117,28 +117,20 @@ class Recaptcha extends AbstractPlugin
         if (!$this->active()) {
             return true;
         }
-        $captchaPassed = false;
-        $recaptchaChallenge = $this->getController()->params()
-            ->fromPost('recaptcha_challenge_field');
-        $recaptchaResponse = $this->getController()->params()
-            ->fromPost('recaptcha_response_field', 'manual_challenge');
-        if (!empty($recaptchaChallenge)) {
-            try {
-                $result = $this->recaptcha->verify(
-                    $recaptchaChallenge,
-                    $recaptchaResponse
-                );
-            } catch (\ZendService\ReCaptcha\Exception $e) {
-                $result = false;
-            }
-            $captchaPassed = $result && $result->isValid();
-            if (!$captchaPassed) {
-                if ($this->errorMode == 'flash') {
-                    $this->getController()->flashMessenger()->setNamespace('error')
-                        ->addMessage('recaptcha_not_passed');
-                } else {
-                    throw new \Exception('recaptcha_not_passed');
-                }
+        $responseField = $this->getController()->params()
+            ->fromPost('g-recaptcha-response');
+        try {
+            $response = $this->recaptcha->verify($responseField);
+        } catch (\ZendService\ReCaptcha\Exception $e) {
+            $response = false;
+        }
+        $captchaPassed = $response && $response->isValid();
+        if (!$captchaPassed) {
+            if ($this->errorMode == 'flash') {
+                $this->getController()->flashMessenger()
+                    ->addMessage('recaptcha_not_passed', 'error');
+            } else {
+                throw new \Exception('recaptcha_not_passed');
             }
         }
         return $captchaPassed;

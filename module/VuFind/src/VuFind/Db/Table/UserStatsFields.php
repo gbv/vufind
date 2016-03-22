@@ -19,22 +19,22 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Db_Table
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 namespace VuFind\Db\Table;
 
 /**
  * Table Definition for statistics
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Db_Table
  * @author   Chris Hallberg <challber@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 class UserStatsFields extends Gateway
 {
@@ -96,7 +96,7 @@ class UserStatsFields extends Gateway
                 [$fields[0] => 'value']
             );
             $select->where->equalTo('field', $fields[0]);
-            for ($i = 1;$i<count($fields);$i++) {
+            for ($i = 1;$i < count($fields);$i++) {
                 $select->where->equalTo('field' . $i . '.field', $fields[$i]);
                 $select->join(
                     ['field' . $i => 'user_stats_fields'],

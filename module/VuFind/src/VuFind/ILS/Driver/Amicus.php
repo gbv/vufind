@@ -19,11 +19,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Josu Moreno <jmoreno@scanbit.net>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 namespace VuFind\ILS\Driver;
 use PDO, PDOException, VuFind\Exception\ILS as ILSException,
@@ -32,11 +32,11 @@ use PDO, PDOException, VuFind\Exception\ILS as ILSException,
 /**
  * Amicus ILS Driver
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Josu Moreno <jmoreno@scanbit.net>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 class Amicus extends AbstractBase implements TranslatorAwareInterface
 {
@@ -495,7 +495,7 @@ class Amicus extends AbstractBase implements TranslatorAwareInterface
                     'duedate' => $this->sacaFecha($row['CPY_ID_NBR']),
                     // TODO: fill this in if you want "recently returned" support:
                     'returnDate' => false,
-                    'number' => count($data) +1,
+                    'number' => count($data) + 1,
                     'item_id' => $row['CPY_ID_NBR'],
                     'barcode' => $row['BRCDE_NBR']
                 ];
@@ -812,8 +812,8 @@ class Amicus extends AbstractBase implements TranslatorAwareInterface
 
         $page = ($page) ? $page : 1;
         $limit = ($limit) ? $limit : 20;
-        $startRow = (($page-1)*$limit)+1;
-        $endRow = ($page*$limit);
+        $startRow = (($page - 1) * $limit) + 1;
+        $endRow = ($page * $limit);
         $sql = "select * from " .
                "(select a.*, rownum rnum from " .
                "(select  CPY_ID.BIB_ITM_NBR  as BIB_ID, CPY_ID.CRTN_DTE " .

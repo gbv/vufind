@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Sierra (III) ILS Driver for Vufind2
+ * Sierra (III) ILS Driver for VuFind
  *
  * PHP version 5
  *
@@ -20,11 +20,11 @@
  *   You should have received a copy of the GNU General Public License
  *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Julia Bauder <bauderj@grinnell.edu>
  * @license  http://opensource.org/licenses/GPL-3.0 GNU General Public License
- * @link     http://vufind.org/wiki/building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 namespace VuFind\ILS\Driver;
 
@@ -32,13 +32,13 @@ use VuFind\Exception\ILS as ILSException,
     VuFind\I18n\Translator\TranslatorAwareInterface;
 
 /**
- * Sierra (III) ILS Driver for Vufind2
+ * Sierra (III) ILS Driver for VuFind
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Julia Bauder <bauderj@grinnell.edu>
  * @license  http://opensource.org/licenses/GPL-3.0 GNU General Public License
- * @link     http://vufind.org/wiki/building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 class Sierra extends AbstractBase implements TranslatorAwareInterface
 {
@@ -82,7 +82,7 @@ class Sierra extends AbstractBase implements TranslatorAwareInterface
         // see Millennium manual page #105781 for the logic behind this
         for ($i = $numberLength; $i > 0; $i--) {
             $j = $numberLength - $i;
-            $partialCheck = $partialCheck + ($digitArray[$j] * ($i+1));
+            $partialCheck = $partialCheck + ($digitArray[$j] * ($i + 1));
         }
         $checkdigit = $partialCheck % 11;
         if ($checkdigit == 10) {
@@ -133,7 +133,7 @@ class Sierra extends AbstractBase implements TranslatorAwareInterface
         }
 
         // Convert hours to seconds:
-        $seconds = 60*60*$this->config['Catalog']['just_cataloged_time'];
+        $seconds = 60 * 60 * $this->config['Catalog']['just_cataloged_time'];
 
         // Was this a recently cataloged item? If so, return a special string
         // based on the append setting....
@@ -171,11 +171,15 @@ class Sierra extends AbstractBase implements TranslatorAwareInterface
             $results = pg_query_params(
                 $this->db, $query, [$this->idStrip($id)]
             );
-            $callnumberarray = pg_fetch_array($results, 0, PGSQL_NUM);
-            $callnumber = $callnumberarray[0];
+            if (pg_num_rows($results) > 0) {
+                $callnumberarray = pg_fetch_array($results, 0, PGSQL_NUM);
+                $callnumber = $callnumberarray[0];
+                // stripping subfield codes from call numbers
+                $callnumber = preg_replace('/\|(a|b)/', ' ', $callnumber);
+            } else {
+                $callnumber = '';
+            }
         }
-        // stripping subfield codes from call numbers
-        $callnumber = preg_replace('/\|(a|b)/', ' ', $callnumber);
         return $callnumber;
     }
 
@@ -493,7 +497,9 @@ class Sierra extends AbstractBase implements TranslatorAwareInterface
             pg_prepare($this->db, "prep_query", $query1);
             foreach ($itemIds as $item) {
                 $callnumber = null;
+                $barcode = null;
                 $results1 = pg_execute($this->db, "prep_query", [$item]);
+                $number = null;
                 while ($row1 = pg_fetch_row($results1)) {
                     if ($row1[4] == "b") {
                         $barcode = $row1[3];

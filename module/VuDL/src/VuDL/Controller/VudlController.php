@@ -19,12 +19,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Controller
  * @author   Chris Hallberg <challber@villanova.edu>
  * @author   David Lacy <david.lacy@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 namespace VuDL\Controller;
 use VuFind\Exception\RecordMissing as RecordMissingException,
@@ -33,11 +33,11 @@ use VuFind\Exception\RecordMissing as RecordMissingException,
 /**
  * This controller is for the viewing of the digital library files.
  *
- * @category VuFind2
+ * @category VuFind
  * @package  Controller
  * @author   Chris Hallberg <challber@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org   Main Site
+ * @link     https://vufind.org Main Site
  */
 class VudlController extends AbstractVuDL
 {
@@ -178,7 +178,7 @@ class VudlController extends AbstractVuDL
         $start = $this->params()->fromQuery('start');
         $end = $this->params()->fromQuery('end');
         $data = [
-            'outline' => $this->getOutline($id, $start, $end-$start),
+            'outline' => $this->getOutline($id, $start, $end - $start),
             'start'  => (int)$start
         ];
         $data['outline'] = current($data['outline']['lists']);
@@ -252,7 +252,7 @@ class VudlController extends AbstractVuDL
         $view->id = $root;
 
         try {
-            $driver = $this->getRecordLoader()->load($root, 'VuFind');
+            $driver = $this->getRecordLoader()->load($root);
         } catch(\Exception $e) {
         }
         if (isset($driver) && $driver->isProtected()) {
@@ -271,7 +271,7 @@ class VudlController extends AbstractVuDL
         // Get ids for all files
         $outline = $this->getOutline(
             $root,
-            max(0, $view->initPage-($this->getConnector()->getPageLength()/2))
+            max(0, $view->initPage - ($this->getConnector()->getPageLength() / 2))
         );
 
         // Send the data for the first pages
@@ -283,7 +283,6 @@ class VudlController extends AbstractVuDL
         $view->parents = $parents;
         if ($id != $root) {
             $view->parentID = $root;
-            $view->breadcrumbEnd = $outline['lists'][0][$view->initPage]['label'];
         }
         $view->pagelength = $this->getConnector()->getPageLength();
         return $view;
@@ -431,11 +430,11 @@ class VudlController extends AbstractVuDL
                 ->toRoute('collection', ['id' => $params['trail']]);
         } elseif (isset($params['prev'])) {
             return $this->redirect()->toRoute(
-                'vudl-record', ['id' => $members[($index-1)%count($members)]]
+                'vudl-record', ['id' => $members[($index - 1) % count($members)]]
             );
         } else {
             return $this->redirect()->toRoute(
-                'vudl-record', ['id' => $members[($index+1)%count($members)]]
+                'vudl-record', ['id' => $members[($index + 1) % count($members)]]
             );
         }
     }

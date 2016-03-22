@@ -19,11 +19,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Verus Solutions <info@verussolutions.biz>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 namespace VuFind\ILS\Driver;
 use PDO, PDOException, VuFind\Exception\ILS as ILSException;
@@ -31,11 +31,11 @@ use PDO, PDOException, VuFind\Exception\ILS as ILSException;
 /**
  * ILS Driver for NewGenLib
  *
- * @category VuFind2
+ * @category VuFind
  * @package  ILS_Drivers
  * @author   Verus Solutions <info@verussolutions.biz>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
- * @link     http://vufind.org/wiki/vufind2:building_an_ils_driver Wiki
+ * @link     https://vufind.org/wiki/development:plugins:ils_drivers Wiki
  */
 class NewGenLib extends AbstractBase
 {
@@ -157,7 +157,7 @@ class NewGenLib extends AbstractBase
         $id = "";
         while ($row = $sqlStmt->fetch(PDO::FETCH_ASSOC)) {
             $id = $row['cataloguerecordid'] . "_" . $row['owner_library_id'];
-            $amount = $row['fine_amt']*100;
+            $amount = $row['fine_amt'] * 100;
             $checkout = $row['ta_date'];
             $duedate = $row['due_date'];
             $paidamtsql = "select sum(f.fine_amt_paid) as fine_amt_paid from " .
@@ -172,8 +172,8 @@ class NewGenLib extends AbstractBase
             $paidamt = "";
             $balance = "";
             while ($rowpaid = $sqlStmt1->fetch(PDO::FETCH_ASSOC)) {
-                $paidamt = $rowpaid['fine_amt_paid']*100;
-                $balance = $amount-$paidamt;
+                $paidamt = $rowpaid['fine_amt_paid'] * 100;
+                $balance = $amount - $paidamt;
             }
 
             $MyFines[] = ['amount' => $amount,
