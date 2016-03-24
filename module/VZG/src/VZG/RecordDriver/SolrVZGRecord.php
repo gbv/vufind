@@ -56,8 +56,8 @@ class SolrVZGRecord extends VuFindSolrMarc
     public function getShortTitle()
     {
         return isset($this->fields['title_short']) ?
-            $this->fields['title_short'] : is_array($this->fields['title_short']) ?
-            $this->fields['title_short'][0] : '';
+            is_array($this->fields['title_short']) ?
+            $this->fields['title_short'][0] : $this->fields['title_short'] : '';
     }
 
     /**
@@ -68,8 +68,8 @@ class SolrVZGRecord extends VuFindSolrMarc
     public function getTitle()
     {
         return isset($this->fields['title']) ?
-            $this->fields['title'] : is_array($this->fields['title']) ?
-            $this->fields['title'][0] : '';
+            is_array($this->fields['title']) ?
+            $this->fields['title'][0] : $this->fields['title'] : '';
     }
 
     /**
@@ -80,8 +80,8 @@ class SolrVZGRecord extends VuFindSolrMarc
     public function getSubtitle()
     {
         return isset($this->fields['title_sub']) ?
-            $this->fields['title_sub'] : is_array($this->fields['title_sub']) ?
-            $this->fields['title_sub'][0] : '';
+            is_array($this->fields['title_sub']) ?
+            $this->fields['title_sub'][0] : $this->fields['title_sub'] : '';
     }
 
      /**
@@ -92,13 +92,9 @@ class SolrVZGRecord extends VuFindSolrMarc
       */
      public function getPrimaryAuthors()
      {
-         if (is_array($this->fields['author'])) {
-             return $this->fields['author'];
-         } elseif (isset($this->fields['author'])) {
-             return array($this->fields['author']);
-         } else {
-             return [];
-         }
+        return isset($this->fields['author']) ?
+            is_array($this->fields['author']) ?
+            $this->fields['author'] : array($this->fields['author']) : [];
      }
 
 
