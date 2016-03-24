@@ -92,9 +92,13 @@ class SolrVZGRecord extends VuFindSolrMarc
       */
      public function getPrimaryAuthors()
      {
-         return is_array($this->fields['author']) ?
-             $this->fields['author'] : isset($this->fields['author']) ?
-             array($this->fields['author']) : [];
+         if (is_array($this->fields['author'])) {
+             return $this->fields['author'];
+         } elseif (isset($this->fields['author'])) {
+             return array($this->fields['author']);
+         } else {
+             return [];
+         }
      }
 
 
